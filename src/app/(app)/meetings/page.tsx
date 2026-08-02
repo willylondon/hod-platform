@@ -24,7 +24,7 @@ export default function MeetingsPage() {
     <div className="p-4 md:p-6 max-w-7xl mx-auto animate-fade-in">
       <div className="flex-between mb-6">
         <div><h1 className="text-2xl font-bold">Meetings</h1><p className="text-sm text-muted">{meetings.length} meetings</p></div>
-        <button className="btn btn-primary"><Plus className="w-4 h-4" /> New Meeting</button>
+        <a href="/meetings/new" className="btn btn-primary"><Plus className="w-4 h-4" /> New Meeting</a>
       </div>
       {meetings.length === 0 ? (
         <div className="text-center py-12"><p className="text-muted">No meetings yet</p></div>

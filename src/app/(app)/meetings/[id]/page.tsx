@@ -9,13 +9,15 @@ import { ArrowLeft, Clock, MapPin, Users, CheckCheck, Sparkles, Plus } from "luc
 
 export default function MeetingDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const isNew = id === "new";
   const [meeting, setMeeting] = useState<any>(null);
   const [actions, setActions] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isNew);
   const supabase = createClient();
 
   useEffect(() => {
     async function load() {
+      if (isNew) { setLoading(false); return; }
       const { data: m } = await supabase.from("meetings").select("*").eq("id", id).single();
       if (m) {
         setMeeting(m);
@@ -28,6 +30,34 @@ export default function MeetingDetailPage() {
   }, [id]);
 
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-48 mb-6" /><div className="space-y-3">{[1,2,3].map(i => <div key={i} className="skeleton h-20" />)}</div></div>;
+
+  // New meeting form
+  if (isNew) {
+    return (
+      <div className="p-4 md:p-6 max-w-3xl mx-auto animate-fade-in">
+        <a href="/meetings" className="text-sm text-muted hover:text-text flex items-center gap-1 mb-4"><ArrowLeft className="w-4 h-4" /> Back to Meetings</a>
+        <h1 className="text-2xl font-bold mb-6">New Meeting</h1>
+        <div className="card">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="sm:col-span-2"><label className="form-label">Meeting Title</label><input className="form-input" placeholder="e.g. Department Planning Meeting" /></div>
+            <div><label className="form-label">Meeting Type</label><select className="form-select">
+              <option>Department Meeting</option><option>Parent Meeting</option><option>Teacher Coaching</option><option>One-to-One</option><option>Standardisation Meeting</option><option>Professional Development</option><option>Senior Leadership</option><option>Other</option>
+            </select></div>
+            <div><label className="form-label">Date</label><input type="date" className="form-input" /></div>
+            <div><label className="form-label">Start Time</label><input type="time" className="form-input" /></div>
+            <div><label className="form-label">End Time</label><input type="time" className="form-input" /></div>
+            <div><label className="form-label">Location</label><input className="form-input" placeholder="e.g. Conference Room A" /></div>
+            <div className="sm:col-span-2"><label className="form-label">Agenda</label><textarea className="form-input" rows={4} placeholder="Enter agenda items..." /></div>
+          </div>
+          <div className="mt-4 flex gap-3">
+            <button className="btn btn-primary">Save Meeting</button>
+            <a href="/meetings" className="btn btn-secondary">Cancel</a>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!meeting) return <div className="p-6 text-center"><p className="text-muted">Meeting not found</p></div>;
 
   return (

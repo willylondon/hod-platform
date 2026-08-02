@@ -42,16 +42,18 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 export default function ObservationDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const isNew = id === "new";
 
   const [observation, setObservation] = useState<Observation | null>(null);
   const [teacher, setTeacher] = useState<StaffMember | null>(null);
   const [checklist, setChecklist] = useState<ChecklistItem[]>([]);
   const [newItemTitle, setNewItemTitle] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
 
   const load = useCallback(async () => {
+    if (isNew) { setLoading(false); return; }
     const supabase = createClient();
     const { data, error: obsError } = await supabase
       .from("observations")
@@ -148,7 +150,7 @@ export default function ObservationDetailPage() {
     );
   }
 
-  if (error || !observation) {
+  if (error || (!isNew && !observation)) {
     return (
       <div className="space-y-4">
         <Link href="/observations" className="btn btn-ghost btn-sm">
@@ -160,6 +162,37 @@ export default function ObservationDetailPage() {
       </div>
     );
   }
+
+  // New observation form
+  if (isNew) {
+    return (
+      <div className="space-y-6">
+        <Link href="/observations" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted hover:text-text">
+          <ArrowLeft className="h-4 w-4" /> Back to observations
+        </Link>
+        <h1>New Observation</h1>
+        <div className="card">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div><label className="form-label">Teacher</label><select className="form-select"><option>Select a teacher</option><option>Dr. Andrea Williams</option><option>Mr. David Chen</option><option>Ms. Sarah Thompson</option><option>Mr. James McDonald</option><option>Mrs. Patricia James</option><option>Ms. Rachel Foster</option></select></div>
+            <div><label className="form-label">Observation Type</label><select className="form-select"><option>Formal</option><option>Informal</option><option>Drop-in</option><option>Peer</option></select></div>
+            <div><label className="form-label">Subject</label><input className="form-input" placeholder="e.g. English Literature" /></div>
+            <div><label className="form-label">Year Group / Grade</label><input className="form-input" placeholder="e.g. Year 10" /></div>
+            <div><label className="form-label">Date</label><input type="date" className="form-input" /></div>
+            <div><label className="form-label">Time</label><input type="time" className="form-input" /></div>
+            <div><label className="form-label">Duration (minutes)</label><input type="number" className="form-input" placeholder="60" /></div>
+            <div><label className="form-label">Focus</label><input className="form-input" placeholder="e.g. Classroom management" /></div>
+          </div>
+          <div className="mt-4 flex gap-3">
+            <button className="btn btn-primary">Save Observation</button>
+            <Link href="/observations" className="btn btn-secondary">Cancel</Link>
+          </div>
+          <p className="text-xs text-muted mt-3">New observations are saved in Planned status.</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!observation) return null;
 
   const currentStep = TIMELINE.findIndex((t) => t.status === observation.status);
 
