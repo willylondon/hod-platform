@@ -34,7 +34,10 @@ export default function DashboardPage() {
       ]);
 
       if (profile?.full_name) {
-        setFirstName(profile.full_name.split(" ")[0]);
+        const parts = profile.full_name.split(" ");
+        const titles = ["Dr.", "Mr.", "Mrs.", "Ms.", "Prof.", "Sir"];
+        const first = titles.includes(parts[0]) ? (parts[1] || parts[0]) : parts[0];
+        setFirstName(first);
       }
       setTasks(t || []);
       setCountdowns(c || []);
