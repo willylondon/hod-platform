@@ -14,12 +14,17 @@ export default function DashboardPage() {
   const [observations, setObservations] = useState<Observation[]>([]);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [quote, setQuote] = useState<LeadershipQuote | null>(null);
+  const [firstName, setFirstName] = useState("");
   const [loading, setLoading] = useState(true);
   const supabase = createClient();
 
   useEffect(() => {
     async function load() {
-      const [{ data: t }, { data: c }, { data: g }, { data: o }, { data: m }, { data: q }] = await Promise.all([
+      const { data: { user } } = await supabase.auth.getUser();
+      const userId = user?.id;
+
+      const [{ data: profile }, { data: t }, { data: c }, { data: g }, { data: o }, { data: m }, { data: q }] = await Promise.all([
+        userId ? supabase.from("profiles").select("full_name").eq("id", userId).maybeSingle() : Promise.resolve({ data: null }),
         supabase.from("tasks").select("*").order("deadline", { ascending: true }),
         supabase.from("countdowns").select("*").order("event_date"),
         supabase.from("department_goals").select("*").order("target_date"),
@@ -27,12 +32,16 @@ export default function DashboardPage() {
         supabase.from("meetings").select("*").order("date"),
         supabase.from("leadership_quotes").select("*"),
       ]);
+
+      if (profile?.full_name) {
+        setFirstName(profile.full_name.split(" ")[0]);
+      }
       setTasks(t || []);
       setCountdowns(c || []);
       setGoals(g || []);
       setObservations(o || []);
       setMeetings(m || []);
-      setQuote(q?.[Math.floor(Math.random() * (q?.length || 1))] || null);
+      setQuote(q?.[Math.floor(Math.random() * (q?.length || 1))] || { text: "The function of leadership is to produce more leaders, not followers.", author: "Ralph Nader" });
       setLoading(false);
     }
     load();
@@ -61,7 +70,7 @@ export default function DashboardPage() {
       {/* Header */}
       <div className="mb-6">
         <p className="text-sm text-muted">{formatDate(new Date())}</p>
-        <h1 className="text-2xl font-bold mt-1">{getGreeting()}, Head of Department</h1>
+        <h1 className="text-2xl font-bold mt-1">{getGreeting()}{firstName ? `, ${firstName}` : ""}</h1>
       </div>
 
       {/* Quote */}

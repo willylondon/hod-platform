@@ -1,21 +1,81 @@
 "use client";
 
-import { useState } from "react";
-import { User, Bell, Bot, Calendar, Upload, Shield, Info } from "lucide-react";
+import { useEffect, useState } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { User, Bell, Bot, Calendar, Upload, Shield, Info, Save, Check } from "lucide-react";
 
 export default function SettingsPage() {
+  const supabase = createClient();
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [profile, setProfile] = useState({ full_name: "", email: "", role: "", department: "", school: "" });
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { setLoading(false); return; }
+
+      const { data: p } = await supabase.from("profiles").select("full_name, role, school_id, department_id").eq("id", user.id).maybeSingle();
+      let deptName = "";
+      let schoolName = "";
+
+      if (p?.department_id) {
+        const { data: d } = await supabase.from("departments").select("name").eq("id", p.department_id).maybeSingle();
+        deptName = d?.name || "";
+      }
+      if (p?.school_id) {
+        const { data: s } = await supabase.from("schools").select("name").eq("id", p.school_id).maybeSingle();
+        schoolName = s?.name || "";
+      }
+
+      setProfile({
+        full_name: p?.full_name || "",
+        email: user.email || "",
+        role: p?.role || "head_of_department",
+        department: deptName,
+        school: schoolName,
+      });
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  async function saveProfile() {
+    setSaving(true);
+    setSaved(false);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    await supabase.from("profiles").upsert({
+      id: user.id,
+      full_name: profile.full_name,
+      role: profile.role,
+      email: user.email,
+    });
+    setSaving(false);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  if (loading) return <div className="p-6"><div className="skeleton h-8 w-32 mb-6" /><div className="space-y-4">{[1,2,3].map(i => <div key={i} className="skeleton h-16" />)}</div></div>;
+
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto animate-fade-in">
       <h1 className="text-2xl font-bold mb-6">Settings</h1>
 
       {/* Profile */}
       <div className="card mb-6">
-        <div className="flex items-center gap-4 mb-4"><User className="w-5 h-5 text-muted" /><h2 className="text-lg font-semibold">Profile</h2></div>
+        <div className="flex-between mb-4">
+          <div className="flex items-center gap-4"><User className="w-5 h-5 text-muted" /><h2 className="text-lg font-semibold">Profile</h2></div>
+          <button onClick={saveProfile} disabled={saving} className="btn btn-primary btn-sm">
+            {saving ? <><Save className="w-3.5 h-3.5 animate-spin" /> Saving...</> : saved ? <><Check className="w-3.5 h-3.5" /> Saved</> : <><Save className="w-3.5 h-3.5" /> Save</>}
+          </button>
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div><label className="form-label">Full Name</label><input className="form-input" defaultValue="Head of Department" /></div>
-          <div><label className="form-label">Email</label><input className="form-input" defaultValue="hod@school.edu" disabled /></div>
-          <div><label className="form-label">Role</label><input className="form-input" defaultValue="Head of Department" disabled /></div>
-          <div><label className="form-label">Department</label><input className="form-input" defaultValue="English Department" disabled /></div>
+          <div><label className="form-label">Full Name</label><input className="form-input" value={profile.full_name} onChange={e => setProfile(p => ({ ...p, full_name: e.target.value }))} /></div>
+          <div><label className="form-label">Email</label><input className="form-input" value={profile.email} disabled /></div>
+          <div><label className="form-label">Department</label><input className="form-input" value={profile.department} disabled /></div>
+          <div><label className="form-label">School</label><input className="form-input" value={profile.school} disabled /></div>
         </div>
       </div>
 

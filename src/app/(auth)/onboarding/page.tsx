@@ -14,7 +14,7 @@ export default function OnboardingPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState({
     full_name: "", school_name: "Kingston College", department_name: "English Department",
-    academic_year: "2026-2027", current_term: "Autumn",
+    academic_year: "2026-2027", current_term: "Term 1",
     working_days: ["Monday","Tuesday","Wednesday","Thursday","Friday"],
     preferred_hours_start: "08:00", preferred_hours_end: "16:00",
     notifications_in_app: true, notifications_email: false,
@@ -70,7 +70,7 @@ export default function OnboardingPage() {
                 <div><label className="form-label">Department Name</label><input className="form-input" value={form.department_name} onChange={e => update("department_name", e.target.value)} /></div>
                 <div className="grid grid-cols-2 gap-4">
                   <div><label className="form-label">Academic Year</label><input className="form-input" value={form.academic_year} onChange={e => update("academic_year", e.target.value)} /></div>
-                  <div><label className="form-label">Current Term</label><select className="form-select" value={form.current_term} onChange={e => update("current_term", e.target.value)}><option>Autumn</option><option>Spring</option><option>Summer</option></select></div>
+                  <div><label className="form-label">Current Term</label><select className="form-select" value={form.current_term} onChange={e => update("current_term", e.target.value)}><option>Term 1</option><option>Term 2</option><option>Term 3</option></select></div>
                 </div>
               </div>
             </>
