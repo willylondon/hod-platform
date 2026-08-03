@@ -28,7 +28,7 @@ export default function ObservationsPage() {
           .from("observations")
           .select("*")
           .order("scheduled_date", { ascending: false, nullsFirst: false }),
-        supabase.from("staff_members").select("*"),
+        supabase.from("staff").select("*"),
       ]);
 
       if (obsRes.error) {

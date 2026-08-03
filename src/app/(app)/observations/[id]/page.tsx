@@ -1,9 +1,9 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
@@ -16,6 +16,7 @@ import {
   Plus,
   Sparkles,
   User,
+  Loader2,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import type {
@@ -41,6 +42,7 @@ type SaveState = "idle" | "saving" | "saved" | "error";
 
 export default function ObservationDetailPage() {
   const params = useParams<{ id: string }>();
+  const router = useRouter();
   const id = params.id;
   const isNew = id === "new";
 
@@ -51,43 +53,65 @@ export default function ObservationDetailPage() {
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
-
-  const load = useCallback(async () => {
-    if (isNew) { setLoading(false); return; }
-    const supabase = createClient();
-    const { data, error: obsError } = await supabase
-      .from("observations")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    if (obsError || !data) {
-      setError(obsError?.message ?? "Observation not found");
-      setLoading(false);
-      return;
-    }
-
-    const obs = data as Observation;
-    setObservation(obs);
-
-    const [teacherRes, checklistRes] = await Promise.all([
-      supabase.from("staff_members").select("*").eq("id", obs.teacher_id).single(),
-      supabase
-        .from("checklist_items")
-        .select("*")
-        .eq("parent_type", "observation")
-        .eq("parent_id", obs.id)
-        .order("sort_order"),
-    ]);
-
-    setTeacher((teacherRes.data as StaffMember) ?? null);
-    setChecklist((checklistRes.data as ChecklistItem[]) ?? []);
-    setLoading(false);
-  }, [id]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [creating, setCreating] = useState(false);
+  const [newObservation, setNewObservation] = useState({
+    teacher_id: "",
+    teacher_name: "",
+    observation_type: "formal",
+    subject: "",
+    year_group: "",
+    scheduled_date: "",
+    scheduled_time: "",
+    duration_minutes: "60",
+    observation_focus: "",
+  });
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    const supabase = createClient();
+
+    async function load() {
+      if (isNew) {
+        const { data, error: staffError } = await supabase
+          .from("staff")
+          .select("*")
+          .eq("status", "active")
+          .order("full_name");
+        if (!active) return;
+        if (staffError) setError(staffError.message);
+        setStaff((data as StaffMember[]) ?? []);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error: obsError } = await supabase
+        .from("observations")
+        .select("*")
+        .eq("id", id)
+        .single();
+      if (!active) return;
+      if (obsError || !data) {
+        setError(obsError?.message ?? "Observation not found");
+        setLoading(false);
+        return;
+      }
+
+      const obs = data as Observation;
+      setObservation(obs);
+      const [teacherRes, checklistRes] = await Promise.all([
+        supabase.from("staff").select("*").eq("id", obs.teacher_id).single(),
+        supabase.from("checklist_items").select("*").eq("parent_type", "observation").eq("parent_id", obs.id).order("sort_order"),
+      ]);
+      if (!active) return;
+      setTeacher((teacherRes.data as StaffMember) ?? null);
+      setChecklist((checklistRes.data as ChecklistItem[]) ?? []);
+      setLoading(false);
+    }
+
+    void load();
+    return () => { active = false; };
+  }, [id, isNew]);
 
   async function saveField(field: keyof Observation, value: string | boolean | null) {
     if (!observation) return;
@@ -140,6 +164,95 @@ export default function ObservationDetailPage() {
     setNewItemTitle("");
   }
 
+  async function createObservation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (creating) return;
+    setCreating(true);
+    setError(null);
+
+    const supabase = createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      setError("Your session has expired. Please sign in again.");
+      setCreating(false);
+      return;
+    }
+
+    let teacherId = newObservation.teacher_id;
+    if (teacherId === "new") {
+      const teacherName = newObservation.teacher_name.trim();
+      if (!teacherName) {
+        setError("Enter the teacher's name.");
+        setCreating(false);
+        return;
+      }
+
+      const { data: profileData } = await supabase
+        .from("profiles")
+        .select("school_id, department_id")
+        .eq("id", user.id)
+        .maybeSingle();
+      if (!profileData?.school_id) {
+        setError("Add your school in Settings before adding a teacher.");
+        setCreating(false);
+        return;
+      }
+
+      const emailSlug = teacherName.toLowerCase().replace(/[^a-z0-9]+/g, ".").replace(/^\.|\.$/g, "") || "teacher";
+      const { data: createdTeacher, error: teacherError } = await supabase
+        .from("staff")
+        .insert({
+          school_id: profileData.school_id,
+          department_id: profileData.department_id,
+          full_name: teacherName,
+          job_title: "Teacher",
+          email: `${emailSlug}.${Date.now()}@staff.local`,
+          status: "active",
+        })
+        .select()
+        .single();
+
+      if (teacherError || !createdTeacher) {
+        setError(teacherError?.message ?? "The teacher could not be added.");
+        setCreating(false);
+        return;
+      }
+      teacherId = createdTeacher.id;
+    }
+
+    if (!teacherId) {
+      setError("Select a teacher or choose ‘Add a teacher’.");
+      setCreating(false);
+      return;
+    }
+
+    const { data, error: insertError } = await supabase
+      .from("observations")
+      .insert({
+        teacher_id: teacherId,
+        observer_id: user.id,
+        observation_type: newObservation.observation_type,
+        subject: newObservation.subject.trim() || null,
+        year_group: newObservation.year_group.trim() || null,
+        scheduled_date: newObservation.scheduled_date || null,
+        scheduled_time: newObservation.scheduled_time || null,
+        duration_minutes: newObservation.duration_minutes ? Number(newObservation.duration_minutes) : null,
+        observation_focus: newObservation.observation_focus.trim() || null,
+        status: "planned",
+      })
+      .select("id")
+      .single();
+
+    if (insertError || !data) {
+      setError(insertError?.message ?? "The observation could not be saved.");
+      setCreating(false);
+      return;
+    }
+
+    router.push(`/observations/${data.id}`);
+    router.refresh();
+  }
+
   if (loading) {
     return (
       <div className="space-y-4">
@@ -171,23 +284,25 @@ export default function ObservationDetailPage() {
           <ArrowLeft className="h-4 w-4" /> Back to observations
         </Link>
         <h1>New Observation</h1>
-        <div className="card">
+        <form className="card" onSubmit={createObservation}>
+          {error && <div className="mb-4 rounded-md border border-error/30 bg-error/5 px-4 py-3 text-sm text-error" role="alert">{error}</div>}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div><label className="form-label">Teacher</label><select className="form-select"><option>Select a teacher</option><option>Dr. Andrea Williams</option><option>Mr. David Chen</option><option>Ms. Sarah Thompson</option><option>Mr. James McDonald</option><option>Mrs. Patricia James</option><option>Ms. Rachel Foster</option></select></div>
-            <div><label className="form-label">Observation Type</label><select className="form-select"><option>Formal</option><option>Informal</option><option>Drop-in</option><option>Peer</option></select></div>
-            <div><label className="form-label">Subject</label><input className="form-input" placeholder="e.g. English Literature" /></div>
-            <div><label className="form-label">Year Group / Grade</label><input className="form-input" placeholder="e.g. Year 10" /></div>
-            <div><label className="form-label">Date</label><input type="date" className="form-input" /></div>
-            <div><label className="form-label">Time</label><input type="time" className="form-input" /></div>
-            <div><label className="form-label">Duration (minutes)</label><input type="number" className="form-input" placeholder="60" /></div>
-            <div><label className="form-label">Focus</label><input className="form-input" placeholder="e.g. Classroom management" /></div>
+            <div><label htmlFor="observation-teacher" className="form-label">Teacher</label><select id="observation-teacher" className="form-select" value={newObservation.teacher_id} onChange={e => setNewObservation(v => ({ ...v, teacher_id: e.target.value }))} required><option value="">Select a teacher</option>{staff.map(member => <option key={member.id} value={member.id}>{member.full_name}</option>)}<option value="new">+ Add a teacher</option></select></div>
+            {newObservation.teacher_id === "new" && <div><label htmlFor="new-teacher-name" className="form-label">Teacher Name</label><input id="new-teacher-name" className="form-input" value={newObservation.teacher_name} onChange={e => setNewObservation(v => ({ ...v, teacher_name: e.target.value }))} placeholder="Enter the teacher's full name" required /></div>}
+            <div><label htmlFor="observation-type" className="form-label">Observation Type</label><select id="observation-type" className="form-select" value={newObservation.observation_type} onChange={e => setNewObservation(v => ({ ...v, observation_type: e.target.value }))}><option value="formal">Formal</option><option value="informal">Informal</option><option value="drop-in">Drop-in</option><option value="peer">Peer</option></select></div>
+            <div><label htmlFor="observation-subject" className="form-label">Subject</label><input id="observation-subject" className="form-input" value={newObservation.subject} onChange={e => setNewObservation(v => ({ ...v, subject: e.target.value }))} placeholder="e.g. English Literature" /></div>
+            <div><label htmlFor="observation-year" className="form-label">Year Group / Grade</label><input id="observation-year" className="form-input" value={newObservation.year_group} onChange={e => setNewObservation(v => ({ ...v, year_group: e.target.value }))} placeholder="e.g. Year 10" /></div>
+            <div><label htmlFor="observation-date" className="form-label">Date</label><input id="observation-date" type="date" className="form-input" value={newObservation.scheduled_date} onChange={e => setNewObservation(v => ({ ...v, scheduled_date: e.target.value }))} /></div>
+            <div><label htmlFor="observation-time" className="form-label">Time</label><input id="observation-time" type="time" className="form-input" value={newObservation.scheduled_time} onChange={e => setNewObservation(v => ({ ...v, scheduled_time: e.target.value }))} /></div>
+            <div><label htmlFor="observation-duration" className="form-label">Duration (minutes)</label><input id="observation-duration" type="number" min="1" className="form-input" value={newObservation.duration_minutes} onChange={e => setNewObservation(v => ({ ...v, duration_minutes: e.target.value }))} /></div>
+            <div><label htmlFor="observation-focus" className="form-label">Focus</label><input id="observation-focus" className="form-input" value={newObservation.observation_focus} onChange={e => setNewObservation(v => ({ ...v, observation_focus: e.target.value }))} placeholder="e.g. Classroom management" /></div>
           </div>
           <div className="mt-4 flex gap-3">
-            <button className="btn btn-primary">Save Observation</button>
+            <button type="submit" className="btn btn-primary" disabled={creating}>{creating ? <><Loader2 className="h-4 w-4 animate-spin" /> Saving...</> : "Save Observation"}</button>
             <Link href="/observations" className="btn btn-secondary">Cancel</Link>
           </div>
           <p className="text-xs text-muted mt-3">New observations are saved in Planned status.</p>
-        </div>
+        </form>
       </div>
     );
   }

@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate, isOverdue } from "@/lib/utils";
 import type { Task, Priority, TaskStatus } from "@/lib/types";
-import { Plus, Search, Filter, CheckCircle2, Circle, Clock, AlertTriangle, X, LayoutList, LayoutGrid, Layers, Pencil } from "lucide-react";
+import { Plus, Search, CheckCircle2, Circle, Clock, X, LayoutList, LayoutGrid, Layers, Loader2 } from "lucide-react";
 
 const STATUSES: TaskStatus[] = ["not_started", "in_progress", "waiting", "completed", "cancelled"];
 const PRIORITIES: Priority[] = ["low", "medium", "high", "urgent"];
@@ -18,25 +18,65 @@ export default function TasksPage() {
   const [view, setView] = useState<"list" | "board" | "grouped">("list");
   const [showForm, setShowForm] = useState(false);
   const [newTitle, setNewTitle] = useState("");
-  const supabase = createClient();
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => { loadTasks(); }, []);
-  async function loadTasks() {
-    const { data } = await supabase.from("tasks").select("*").order("deadline", { ascending: true });
-    setTasks(data || []);
-    setLoading(false);
-  }
+  useEffect(() => {
+    let active = true;
+    const supabase = createClient();
+    supabase.from("tasks").select("*").order("deadline", { ascending: true }).then(({ data, error: loadError }) => {
+      if (!active) return;
+      if (loadError) setError(loadError.message);
+      setTasks((data as Task[]) || []);
+      setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
 
   async function toggleStatus(task: Task) {
+    const supabase = createClient();
     const next: TaskStatus = task.status === "completed" ? "not_started" : "completed";
     await supabase.from("tasks").update({ status: next, completed_at: next === "completed" ? new Date().toISOString() : null }).eq("id", task.id);
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status: next, completed_at: next === "completed" ? new Date().toISOString() : undefined } : t));
   }
 
-  async function createTask() {
-    if (!newTitle.trim()) return;
-    const { data } = await supabase.from("tasks").insert({ title: newTitle, priority: "medium", status: "not_started", created_by: "00000000-0000-0000-0000-000000000000" }).select().single();
-    if (data) { setTasks(prev => [data, ...prev]); setNewTitle(""); setShowForm(false); }
+  async function createTask(event?: React.FormEvent) {
+    event?.preventDefault();
+    const title = newTitle.trim();
+    if (!title || creating) return;
+
+    setCreating(true);
+    setError(null);
+    const supabase = createClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      setError("Your session has expired. Please sign in again before adding a task.");
+      setCreating(false);
+      return;
+    }
+
+    const { data, error: insertError } = await supabase
+      .from("tasks")
+      .insert({
+        title,
+        priority: "medium",
+        status: "not_started",
+        is_recurring: false,
+        created_by: user.id,
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      setError(insertError.message);
+      setCreating(false);
+      return;
+    }
+
+    setTasks(prev => [data as Task, ...prev]);
+    setNewTitle("");
+    setShowForm(false);
+    setCreating(false);
   }
 
   const filtered = tasks.filter(t => {
@@ -65,14 +105,18 @@ export default function TasksPage() {
 
       {/* Quick create */}
       {showForm && (
-        <div className="card mb-4 p-3">
+        <form className="card mb-4 p-3" onSubmit={createTask}>
           <div className="flex gap-2">
-            <input className="form-input flex-1" placeholder="Task title... (press Enter)" value={newTitle} onChange={e => setNewTitle(e.target.value)} onKeyDown={e => e.key === "Enter" && createTask()} autoFocus />
-            <button onClick={createTask} className="btn btn-primary btn-sm">Add</button>
-            <button onClick={() => setShowForm(false)} className="btn btn-ghost btn-sm"><X className="w-4 h-4" /></button>
+            <input className="form-input flex-1" placeholder="Task title..." value={newTitle} onChange={e => setNewTitle(e.target.value)} autoFocus required />
+            <button type="submit" disabled={creating || !newTitle.trim()} className="btn btn-primary btn-sm">
+              {creating ? <><Loader2 className="w-4 h-4 animate-spin" /> Adding...</> : "Add"}
+            </button>
+            <button type="button" onClick={() => setShowForm(false)} className="btn btn-ghost btn-sm" aria-label="Cancel new task"><X className="w-4 h-4" /></button>
           </div>
-        </div>
+        </form>
       )}
+
+      {error && <div className="mb-4 rounded-md border border-error/30 bg-error/5 px-4 py-3 text-sm text-error" role="alert">{error}</div>}
 
       {/* Filters + View toggle */}
       <div className="flex flex-wrap gap-3 mb-6">
