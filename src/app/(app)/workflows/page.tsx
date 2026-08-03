@@ -2,13 +2,15 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Plus, Play, Archive, Clock, CheckCircle2 } from "lucide-react";
+import { Plus, Play, Archive, Clock, CheckCircle2, AlertCircle } from "lucide-react";
 
 export default function WorkflowsPage() {
   const [templates, setTemplates] = useState<any[]>([]);
   const [instances, setInstances] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const supabase = createClient();
 
   useEffect(() => {
@@ -25,19 +27,34 @@ export default function WorkflowsPage() {
   }, []);
 
   async function startWorkflow(templateId: string) {
+    setError(null);
     const template = templates.find(t => t.id === templateId);
-    const { data } = await supabase.from("workflow_instances").insert({
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setError("Your session has expired. Please sign in again.");
+      return;
+    }
+    const { data, error: insertError } = await supabase.from("workflow_instances").insert({
       template_id: templateId,
       title: template?.title || "New Workflow",
       status: "in_progress",
       start_date: new Date().toISOString().split("T")[0],
-      created_by: "00000000-0000-0000-0000-000000000000",
+      created_by: user.id,
     }).select().single();
+    if (insertError) {
+      setError(`Couldn't start this workflow: ${insertError.message}`);
+      return;
+    }
     if (data) setInstances(prev => [data, ...prev]);
   }
 
   async function archiveTemplate(id: string) {
-    await supabase.from("workflow_templates").update({ is_archived: true }).eq("id", id);
+    setError(null);
+    const { error: updateError } = await supabase.from("workflow_templates").update({ is_archived: true }).eq("id", id);
+    if (updateError) {
+      setError(`Couldn't archive this template: ${updateError.message}`);
+      return;
+    }
     setTemplates(prev => prev.filter(t => t.id !== id));
   }
 
@@ -51,20 +68,27 @@ export default function WorkflowsPage() {
         <div><h1 className="text-2xl font-bold">Workflows</h1><p className="text-sm text-muted">{activeInstances.length} active, {templates.length} templates</p></div>
       </div>
 
+      {error && (
+        <div className="flex items-start gap-2 rounded-md border border-error/30 bg-error/5 px-3 py-2.5 mb-4 text-sm text-error" role="alert">
+          <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+
       {/* Active instances */}
       {activeInstances.length > 0 && (
         <div className="mb-8">
           <h2 className="text-lg font-semibold mb-4">Active Workflows</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {activeInstances.map((inst: any) => (
-              <a key={inst.id} href={`/workflows/${inst.id}`} className="card card-hover">
+              <Link key={inst.id} href={`/workflows/${inst.id}`} className="card card-hover">
                 <div className="flex-between mb-2">
                   <span className="badge badge-medium text-xs">{inst.status}</span>
                   <Clock className="w-4 h-4 text-muted" />
                 </div>
                 <h3 className="font-semibold mb-1">{inst.title}</h3>
                 {inst.start_date && <p className="text-xs text-muted">Started {inst.start_date}</p>}
-              </a>
+              </Link>
             ))}
           </div>
         </div>
@@ -83,7 +107,7 @@ export default function WorkflowsPage() {
             {t.description && <p className="text-sm text-muted mb-3 line-clamp-2">{t.description}</p>}
             <div className="flex gap-2 mt-3">
               <button onClick={() => startWorkflow(t.id)} className="btn btn-primary btn-sm"><Play className="w-3.5 h-3.5" /> Start</button>
-              <a href={`/workflows/${t.id}`} className="btn btn-secondary btn-sm">View</a>
+              <Link href={`/workflows/${t.id}`} className="btn btn-secondary btn-sm">View</Link>
             </div>
           </div>
         ))}

@@ -2,6 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { getGreeting, formatDate, daysUntil, countdownUrgency, timeAgo } from "@/lib/utils";
 import type { Task, Countdown, DepartmentGoal, Observation, Meeting, LeadershipQuote } from "@/lib/types";
@@ -115,7 +116,7 @@ export default function DashboardPage() {
           <div className="card">
             <div className="flex-between mb-4">
               <h2 className="text-lg font-semibold">Today's Priorities</h2>
-              <a href="/tasks" className="text-sm text-primary hover:underline">View all</a>
+              <Link href="/tasks" className="text-sm text-primary hover:underline">View all</Link>
             </div>
             {[...overdueTasks, ...todayTasks, ...upcomingTasks].slice(0, 8).length === 0 ? (
               <p className="text-sm text-muted py-4 text-center">No tasks due. Well done!</p>
@@ -162,7 +163,7 @@ export default function DashboardPage() {
           <div className="card">
             <div className="flex-between mb-4">
               <h2 className="text-lg font-semibold">Today's Meetings</h2>
-              <a href="/meetings" className="text-sm text-primary hover:underline">All</a>
+              <Link href="/meetings" className="text-sm text-primary hover:underline">All</Link>
             </div>
             {todayMeetings.length === 0 ? (
               <p className="text-sm text-muted py-4 text-center">No meetings today</p>
@@ -180,7 +181,7 @@ export default function DashboardPage() {
           <div className="card">
             <div className="flex-between mb-4">
               <h2 className="text-lg font-semibold">Department Goals</h2>
-              <a href="/goals" className="text-sm text-primary hover:underline">All</a>
+              <Link href="/goals" className="text-sm text-primary hover:underline">All</Link>
             </div>
             {goals.length === 0 ? (
               <p className="text-sm text-muted py-4 text-center">No goals set</p>

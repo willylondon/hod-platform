@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
-import { ChevronRight, ChevronLeft, Check } from "lucide-react";
+import { ChevronRight, ChevronLeft, Check, AlertCircle } from "lucide-react";
 
 const STEPS = ["Profile", "School", "Preferences"];
 
@@ -12,6 +12,7 @@ export default function OnboardingPage() {
   const supabase = createClient();
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     full_name: "", school_name: "Kingston College", department_name: "English Department",
     academic_year: "2026-2027", current_term: "Term 1",
@@ -26,17 +27,56 @@ export default function OnboardingPage() {
 
   async function finish() {
     setSaving(true);
-    const { data: school } = await supabase.from("schools").insert({ name: form.school_name, academic_year: form.academic_year, current_term: form.current_term, working_days: form.working_days, preferred_hours_start: form.preferred_hours_start, preferred_hours_end: form.preferred_hours_end }).select().single();
-    if (school) {
-      const { data: dept } = await supabase.from("departments").insert({ school_id: school.id, name: form.department_name }).select().single();
-      if (dept) {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          await supabase.from("profiles").upsert({ id: user.id, email: user.email!, full_name: form.full_name, role: "head_of_department", school_id: school.id, department_id: dept.id, preferences: { notifications: { in_app: form.notifications_in_app, email: form.notifications_email } } });
-          await supabase.from("settings").upsert({ user_id: user.id, notification_preferences: { email: form.notifications_email, in_app: true, push: false } });
-        }
-      }
+    setError(null);
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) {
+      setError("Your session has expired. Please sign in again.");
+      setSaving(false);
+      return;
     }
+
+    const { error: profileError } = await supabase.from("profiles").insert({
+      id: user.id,
+      email: user.email!,
+      full_name: form.full_name,
+      role: "head_of_department",
+      preferences: {
+        notifications: { in_app: form.notifications_in_app, email: form.notifications_email },
+        academic_year: form.academic_year,
+        current_term: form.current_term,
+        working_days: form.working_days,
+        preferred_hours_start: form.preferred_hours_start,
+        preferred_hours_end: form.preferred_hours_end,
+        priorities: form.priorities,
+      },
+    });
+    if (profileError) {
+      setError(`We couldn't save your profile: ${profileError.message}`);
+      setSaving(false);
+      return;
+    }
+
+    const { error: orgError } = await supabase.rpc("set_profile_organization", {
+      p_school_name: form.school_name,
+      p_department_name: form.department_name,
+    });
+    if (orgError) {
+      setError(`We couldn't set up your school: ${orgError.message}`);
+      setSaving(false);
+      return;
+    }
+
+    const { error: settingsError } = await supabase.from("settings").upsert({
+      user_id: user.id,
+      notification_preferences: { email: form.notifications_email, in_app: true, push: false },
+    });
+    if (settingsError) {
+      setError(`We couldn't save your settings: ${settingsError.message}`);
+      setSaving(false);
+      return;
+    }
+
     router.push("/dashboard");
   }
 
@@ -90,6 +130,13 @@ export default function OnboardingPage() {
                 <div><label className="form-label">Leadership Priorities (optional)</label><textarea className="form-input" rows={3} value={form.priorities} onChange={e => update("priorities", e.target.value)} placeholder="e.g. Improve GCSE results, develop NQTs, curriculum redesign" /></div>
               </div>
             </>
+          )}
+
+          {error && (
+            <div className="flex items-start gap-2 rounded-md border border-error/30 bg-error/5 px-3 py-2.5 mt-6 text-sm text-error" role="alert">
+              <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{error}</span>
+            </div>
           )}
 
           <div className="flex gap-3 mt-8 pt-4 border-t border-border">

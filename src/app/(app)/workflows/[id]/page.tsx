@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate } from "@/lib/utils";
 import { ArrowLeft, CheckCircle2, Circle, Clock, Play } from "lucide-react";
@@ -35,7 +36,7 @@ export default function WorkflowDetailPage() {
 
   return (
     <div className="p-4 md:p-6 max-w-3xl mx-auto animate-fade-in">
-      <a href="/workflows" className="text-sm text-muted hover:text-text flex items-center gap-1 mb-4"><ArrowLeft className="w-4 h-4" /> Back to Workflows</a>
+      <Link href="/workflows" className="text-sm text-muted hover:text-text flex items-center gap-1 mb-4"><ArrowLeft className="w-4 h-4" /> Back to Workflows</Link>
       <div className="flex-between mb-2"><h1 className="text-2xl font-bold">{instance.title}</h1><span className={`badge text-xs ${instance.status === "completed" ? "badge-success" : instance.status === "in_progress" ? "badge-medium" : "badge-low"}`}>{instance.status}</span></div>
       {instance.start_date && <p className="text-sm text-muted mb-4">Started {instance.start_date}</p>}
 

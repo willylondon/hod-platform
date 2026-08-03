@@ -58,6 +58,15 @@ export default function SignInPage() {
         return;
       }
 
+      // Supabase returns a user object with no identities (and no error) when the
+      // email is already registered, to avoid leaking which emails exist. That
+      // means this was actually a wrong password on an existing account, not a
+      // new signup.
+      if (signUpData.user && signUpData.user.identities?.length === 0) {
+        setError("Incorrect email or password.");
+        return;
+      }
+
       if (signUpData.user && signUpData.session) {
         await routeAfterAuth(signUpData.user.id);
         return;

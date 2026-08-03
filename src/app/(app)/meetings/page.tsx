@@ -2,6 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate } from "@/lib/utils";
 import { Plus, Calendar, Clock, MapPin, Users } from "lucide-react";
@@ -24,14 +25,14 @@ export default function MeetingsPage() {
     <div className="p-4 md:p-6 max-w-7xl mx-auto animate-fade-in">
       <div className="flex-between mb-6">
         <div><h1 className="text-2xl font-bold">Meetings</h1><p className="text-sm text-muted">{meetings.length} meetings</p></div>
-        <a href="/meetings/new" className="btn btn-primary"><Plus className="w-4 h-4" /> New Meeting</a>
+        <Link href="/meetings/new" className="btn btn-primary"><Plus className="w-4 h-4" /> New Meeting</Link>
       </div>
       {meetings.length === 0 ? (
         <div className="text-center py-12"><p className="text-muted">No meetings yet</p></div>
       ) : (
         <div className="space-y-3">
           {meetings.map(m => (
-            <a key={m.id} href={`/meetings/${m.id}`} className="card card-hover flex flex-col sm:flex-row sm:items-center gap-4 py-4">
+            <Link key={m.id} href={`/meetings/${m.id}`} className="card card-hover flex flex-col sm:flex-row sm:items-center gap-4 py-4">
               <div className="text-center min-w-[60px]">
                 <p className="text-xs text-muted uppercase">{new Date(m.date).toLocaleString("en", { month: "short" })}</p>
                 <p className="text-xl font-bold">{new Date(m.date).getDate()}</p>
@@ -44,7 +45,7 @@ export default function MeetingsPage() {
                 </div>
               </div>
               <span className={`badge text-xs ${m.meeting_type === "department" ? "badge-medium" : m.meeting_type === "senior_leadership" ? "badge-high" : "badge-low"}`}>{m.meeting_type.replace("_", " ")}</span>
-            </a>
+            </Link>
           ))}
         </div>
       )}

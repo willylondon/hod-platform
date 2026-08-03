@@ -354,7 +354,7 @@ export default function ObservationDetailPage() {
           <div className="flex items-center gap-3">
             <ObservationStatusBadge status={observation.status} />
             <Link
-              href={`/assistant?context=observation&id=${observation.id}&action=feedback`}
+              href={`/ai-assistant?context=observation&id=${observation.id}&action=feedback`}
               className="btn btn-accent"
             >
               <Sparkles className="h-4 w-4" />

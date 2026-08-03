@@ -45,6 +45,10 @@ const CONTEXT_OPTIONS = [
   { id: "workflow-1", label: "Workflow — End of Term Reporting Process" },
 ];
 
+const ACTION_QUERY_PARAM_MAP: Record<string, string> = {
+  feedback: "observation_feedback",
+};
+
 export default function AiAssistantPage() {
   const [mockMode, setMockMode] = useState<boolean | null>(null);
   const [action, setAction] = useState(ACTIONS[0].id);
@@ -62,6 +66,11 @@ export default function AiAssistantPage() {
       .then((r) => r.json())
       .then((d) => setMockMode(Boolean(d.mock)))
       .catch(() => setMockMode(true));
+  }, []);
+
+  useEffect(() => {
+    const requestedAction = ACTION_QUERY_PARAM_MAP[new URLSearchParams(window.location.search).get("action") ?? ""];
+    if (requestedAction) setAction(requestedAction);
   }, []);
 
   const selectedAction = ACTIONS.find((a) => a.id === action)!;
