@@ -32,7 +32,7 @@
 - [ ] **Step 1: Install dependencies**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 npm install mammoth pdf-parse
 ```
 
@@ -150,7 +150,7 @@ export async function POST(request: Request) {
 - [ ] **Step 4: Verify the build**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 npm run build
 ```
 
@@ -172,7 +172,7 @@ Expected: both files exist and are a few KB each.
 - [ ] **Step 6: Manual verification against the dev server**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 npm run dev &
 sleep 3
 
@@ -202,7 +202,7 @@ kill %1
 - [ ] **Step 7: Commit**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 git add package.json package-lock.json next.config.ts src/app/api/extract-text/route.ts
 git commit -m "feat: add /api/extract-text for notes/docx/pdf text extraction"
 ```
@@ -441,7 +441,7 @@ In `CONTEXT.md`:
 - [ ] **Step 5: Verify the build**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 npm run build
 ```
 
@@ -450,7 +450,7 @@ Expected: succeeds, no new errors.
 - [ ] **Step 6: Manual verification against the dev server**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 npm run dev &
 sleep 3
 
@@ -470,7 +470,7 @@ If this returns a 502 with an OpenRouter error, read the error message — it'll
 - [ ] **Step 7: Commit**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 git add src/app/api/ai/route.ts README.md CONTEXT.md
 git commit -m "feat: switch AI backend from OpenAI to OpenRouter, thread styleReference"
 ```
@@ -779,7 +779,7 @@ to:
 - [ ] **Step 7: Verify the build**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 npm run build
 ```
 
@@ -788,7 +788,7 @@ Expected: succeeds, no new TS/ESLint errors introduced (this page already has pr
 - [ ] **Step 8: Commit**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 git add "src/app/(app)/ai-assistant/page.tsx"
 git commit -m "feat: add notes/style-reference file upload to AI Assistant page"
 ```
@@ -802,7 +802,7 @@ git commit -m "feat: add notes/style-reference file upload to AI Assistant page"
 - [ ] **Step 1: Start the dev server**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 lsof -ti:3000 -sTCP:LISTEN | xargs -r kill 2>/dev/null
 npm run dev > /tmp/hod-dev.log 2>&1 &
 for i in $(seq 1 40); do curl -sf http://localhost:3000 >/dev/null 2>&1 && break; sleep 1; done
@@ -874,7 +874,7 @@ Then rename the env var back to `OPENROUTER_API_KEY` and restart the dev server 
 - [ ] **Step 4: Run build and lint one more time**
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 npm run build
 npm run lint
 ```
@@ -893,7 +893,7 @@ lsof -ti:3000 -sTCP:LISTEN | xargs -r kill 2>/dev/null
 If verification uncovered and required fixing any issues in the feature files, commit them:
 
 ```bash
-cd "/Users/willardwells/Documents/Hod School/hod-platform"
+cd "/Users/willardwells/Documents/Hod School/hod-platform/.claude/worktrees/ai-upload-openrouter"
 git add -A
 git status --short  # review before committing — should only show this feature's files
 git commit -m "fix: address issues found during end-to-end verification"
