@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
+import { enforceRateLimit, requireApiUser } from "@/lib/api-security";
 
 export const dynamic = "force-dynamic";
-
-interface AiRequestBody {
-  action?: string;
-  context?: string;
-  prompt?: string;
-  styleReference?: string;
-}
 
 const ACTION_LABELS: Record<string, string> = {
   draft_email: "Draft Email",
@@ -22,6 +17,20 @@ const ACTION_LABELS: Record<string, string> = {
   rewrite_professionally: "Rewrite Professionally",
   notes_to_tasks: "Convert Notes Into Tasks",
 };
+
+const ACTION_IDS = Object.keys(ACTION_LABELS) as [string, ...string[]];
+const AI_REQUEST_SCHEMA = z
+  .object({
+    action: z.enum(ACTION_IDS).default("draft_email"),
+    context: z.string().trim().max(2_000).default(""),
+    prompt: z.string().trim().max(20_000).default(""),
+    styleReference: z.string().trim().max(15_000).default(""),
+  })
+  .strict();
+
+const MAX_REQUEST_BYTES = 64 * 1024;
+const AI_RATE_LIMIT = 10;
+const AI_RATE_WINDOW_MS = 60_000;
 
 function labelFor(action: string): string {
   return ACTION_LABELS[action] ?? action.replace(/_/g, " ");
@@ -227,22 +236,45 @@ Let me know if you would like this adjusted in tone, length, or format.${ctx}${b
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const auth = await requireApiUser(request);
+  if (auth.response) return auth.response;
+
   return NextResponse.json({ mock: !process.env.OPENROUTER_API_KEY });
 }
 
 export async function POST(request: Request) {
-  let body: AiRequestBody;
+  const auth = await requireApiUser(request);
+  if (auth.response) return auth.response;
+
+  const rateLimitResponse = enforceRateLimit(
+    `ai:${auth.user.id}`,
+    AI_RATE_LIMIT,
+    AI_RATE_WINDOW_MS
+  );
+  if (rateLimitResponse) return rateLimitResponse;
+
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_REQUEST_BYTES) {
+    return NextResponse.json({ error: "Request is too large" }, { status: 413 });
+  }
+
+  let rawBody: unknown;
   try {
-    body = await request.json();
+    rawBody = await request.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const action = body.action ?? "draft_email";
-  const context = body.context ?? "";
-  const prompt = body.prompt ?? "";
-  const styleReference = body.styleReference ?? "";
+  const parsedBody = AI_REQUEST_SCHEMA.safeParse(rawBody);
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: "Request fields are invalid or too long" },
+      { status: 400 }
+    );
+  }
+
+  const { action, context, prompt, styleReference } = parsedBody.data;
 
   const apiKey = process.env.OPENROUTER_API_KEY;
 
@@ -285,25 +317,48 @@ export async function POST(request: Request) {
         temperature: 0.7,
         max_tokens: 1500,
       }),
+      cache: "no-store",
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!res.ok) {
-      const errText = await res.text();
-      console.error("OpenRouter API error:", res.status, errText);
+      console.error("OpenRouter API error", {
+        status: res.status,
+        requestId: res.headers.get("x-request-id"),
+      });
       return NextResponse.json(
         { error: `OpenRouter request failed (${res.status})` },
         { status: 502 }
       );
     }
 
-    const data = await res.json();
+    const data: unknown = await res.json();
     const text =
-      data.choices?.[0]?.message?.content?.trim() ??
-      "No response generated.";
+      typeof data === "object" &&
+      data !== null &&
+      "choices" in data &&
+      Array.isArray(data.choices) &&
+      typeof data.choices[0]?.message?.content === "string"
+        ? data.choices[0].message.content.trim()
+        : "";
+
+    if (!text) {
+      console.error("OpenRouter returned an empty or malformed response");
+      return NextResponse.json(
+        { error: "AI provider returned an invalid response" },
+        { status: 502 }
+      );
+    }
 
     return NextResponse.json({ text, mock: false });
   } catch (err) {
     console.error("AI route error:", err);
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      return NextResponse.json(
+        { error: "AI provider timed out. Please try again." },
+        { status: 504 }
+      );
+    }
     return NextResponse.json(
       { error: "Failed to generate response" },
       { status: 500 }

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Award,
   CalendarDays,
@@ -51,9 +52,11 @@ const ACTION_QUERY_PARAM_MAP: Record<string, string> = {
   feedback: "observation_feedback",
 };
 
-export default function AiAssistantPage() {
+function AiAssistantContent() {
+  const searchParams = useSearchParams();
+  const requestedAction = ACTION_QUERY_PARAM_MAP[searchParams.get("action") ?? ""];
   const [mockMode, setMockMode] = useState<boolean | null>(null);
-  const [action, setAction] = useState(ACTIONS[0].id);
+  const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
   const [contextId, setContextId] = useState("");
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
@@ -78,11 +81,7 @@ export default function AiAssistantPage() {
       .catch(() => setMockMode(true));
   }, []);
 
-  useEffect(() => {
-    const requestedAction = ACTION_QUERY_PARAM_MAP[new URLSearchParams(window.location.search).get("action") ?? ""];
-    if (requestedAction) setAction(requestedAction);
-  }, []);
-
+  const action = selectedActionId ?? requestedAction ?? ACTIONS[0].id;
   const selectedAction = ACTIONS.find((a) => a.id === action)!;
   const contextLabel = CONTEXT_OPTIONS.find((c) => c.id === contextId)?.label ?? "";
 
@@ -236,7 +235,7 @@ export default function AiAssistantPage() {
               return (
                 <button
                   key={a.id}
-                  onClick={() => setAction(a.id)}
+                  onClick={() => setSelectedActionId(a.id)}
                   className={cn(
                     "flex items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors",
                     active
@@ -482,5 +481,13 @@ export default function AiAssistantPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function AiAssistantPage() {
+  return (
+    <Suspense fallback={<div className="skeleton h-96 rounded-lg" />}>
+      <AiAssistantContent />
+    </Suspense>
   );
 }
