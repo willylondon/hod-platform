@@ -23,6 +23,7 @@
 
 **Files:**
 - Modify: `package.json` (add `mammoth`, `pdf-parse`)
+- Modify: `next.config.ts` (add `serverExternalPackages`)
 - Create: `src/app/api/extract-text/route.ts`
 
 **Interfaces:**
@@ -35,7 +36,35 @@ cd "/Users/willardwells/Documents/Hod School/hod-platform"
 npm install mammoth pdf-parse
 ```
 
-- [ ] **Step 2: Write the route**
+- [ ] **Step 2: Add the required Next.js config change**
+
+`pdf-parse` (via `pdfjs-dist`) loads a worker file (`pdf.worker.mjs`) at runtime. Turbopack's default bundling rewrites that module's path, breaking the worker lookup — confirmed via a real request against the actual dev server (not just a standalone script), which failed with `Setting up fake worker failed: "Cannot find module '.../.next/dev/server/chunks/pdf.worker.mjs'"`. The fix, confirmed working against both `npm run dev` and `npm run build`, is to tell Next.js not to bundle this package for the server. Do this step before writing the route — testing the route without it will reproduce the worker error.
+
+In `next.config.ts`, change:
+
+```typescript
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  /* config options here */
+};
+
+export default nextConfig;
+```
+
+to:
+
+```typescript
+import type { NextConfig } from "next";
+
+const nextConfig: NextConfig = {
+  serverExternalPackages: ["pdf-parse"],
+};
+
+export default nextConfig;
+```
+
+- [ ] **Step 3: Write the route**
 
 `pdf-parse` at the currently-installed version (2.x) uses a class-based API — `import { PDFParse } from "pdf-parse"`, `new PDFParse({ data: Uint8Array })`, `await parser.getText()` → `{ text }`, then `await parser.destroy()`. It ships its own TypeScript types (no ambient declaration needed) and is built on `pdfjs-dist` with documented Vercel/serverless support. This exact API was verified working end-to-end against a real generated PDF and DOCX before writing this plan (see spec/plan session notes) — don't substitute the older `pdf(buffer)`-style v1 API you may know from training data; it is not what gets installed by a plain `npm install pdf-parse` today.
 
@@ -118,7 +147,7 @@ export async function POST(request: Request) {
 }
 ```
 
-- [ ] **Step 3: Verify the build**
+- [ ] **Step 4: Verify the build**
 
 ```bash
 cd "/Users/willardwells/Documents/Hod School/hod-platform"
@@ -127,7 +156,7 @@ npm run build
 
 Expected: succeeds, `/api/extract-text` appears in the route list as `ƒ` (Dynamic).
 
-- [ ] **Step 4: Generate real test fixtures**
+- [ ] **Step 5: Generate real test fixtures**
 
 Hand-written/fake `.docx`/`.pdf` files are not reliable test fixtures — use the real macOS conversion tools already confirmed present on this machine to generate genuine files:
 
@@ -140,7 +169,7 @@ ls -la /tmp/sample.docx /tmp/sample.pdf
 
 Expected: both files exist and are a few KB each.
 
-- [ ] **Step 5: Manual verification against the dev server**
+- [ ] **Step 6: Manual verification against the dev server**
 
 ```bash
 cd "/Users/willardwells/Documents/Hod School/hod-platform"
@@ -170,11 +199,11 @@ rm -f /tmp/extract-test.txt /tmp/extract-big.txt /tmp/sample.txt /tmp/sample.doc
 kill %1
 ```
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 cd "/Users/willardwells/Documents/Hod School/hod-platform"
-git add package.json package-lock.json src/app/api/extract-text/route.ts
+git add package.json package-lock.json next.config.ts src/app/api/extract-text/route.ts
 git commit -m "feat: add /api/extract-text for notes/docx/pdf text extraction"
 ```
 
