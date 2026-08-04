@@ -43,9 +43,12 @@ export async function POST(request: Request) {
     } else if (ext === ".pdf") {
       const data = new Uint8Array(await file.arrayBuffer());
       const parser = new PDFParse({ data });
-      const result = await parser.getText();
-      await parser.destroy();
-      text = result.text.replace(PDF_PAGE_MARKER, "");
+      try {
+        const result = await parser.getText();
+        text = result.text.replace(PDF_PAGE_MARKER, "");
+      } finally {
+        await parser.destroy();
+      }
     } else {
       return NextResponse.json(
         { error: "Unsupported file type. Use .txt, .md, .docx, or .pdf" },
