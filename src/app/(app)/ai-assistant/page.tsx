@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Award,
   CalendarDays,
@@ -15,8 +15,10 @@ import {
   PenLine,
   Sparkles,
   Trash2,
+  Upload,
   Users,
   Workflow,
+  X,
 } from "lucide-react";
 import type { AiDraft } from "@/lib/types";
 import { cn, formatDateTime } from "@/lib/utils";
@@ -60,6 +62,14 @@ export default function AiAssistantPage() {
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [history, setHistory] = useState<AiDraft[]>([]);
+  const [extractingNotes, setExtractingNotes] = useState(false);
+  const [extractingStyle, setExtractingStyle] = useState(false);
+  const [notesTruncated, setNotesTruncated] = useState(false);
+  const [styleTruncated, setStyleTruncated] = useState(false);
+  const [styleReference, setStyleReference] = useState("");
+  const [styleReferenceFileName, setStyleReferenceFileName] = useState<string | null>(null);
+  const notesFileInputRef = useRef<HTMLInputElement>(null);
+  const styleFileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetch("/api/ai")
@@ -85,7 +95,7 @@ export default function AiAssistantPage() {
       const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, context: contextId ? contextLabel : "", prompt }),
+        body: JSON.stringify({ action, context: contextId ? contextLabel : "", prompt, styleReference: styleReference || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
@@ -95,6 +105,52 @@ export default function AiAssistantPage() {
       setError(e instanceof Error ? e.message : "Something went wrong");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function extractFileText(file: File): Promise<{ text: string; truncated: boolean }> {
+    const formData = new FormData();
+    formData.append("file", file);
+    const res = await fetch("/api/extract-text", { method: "POST", body: formData });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Failed to read file");
+    return { text: data.text as string, truncated: Boolean(data.truncated) };
+  }
+
+  async function handleNotesUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setExtractingNotes(true);
+    setError(null);
+    setNotesTruncated(false);
+    try {
+      const { text, truncated } = await extractFileText(file);
+      setPrompt((p) => (p ? `${p}\n\n${text}` : text));
+      setNotesTruncated(truncated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to read file");
+    } finally {
+      setExtractingNotes(false);
+    }
+  }
+
+  async function handleStyleUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setExtractingStyle(true);
+    setError(null);
+    setStyleTruncated(false);
+    try {
+      const { text, truncated } = await extractFileText(file);
+      setStyleReference(text);
+      setStyleReferenceFileName(file.name);
+      setStyleTruncated(truncated);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to read file");
+    } finally {
+      setExtractingStyle(false);
     }
   }
 
@@ -162,7 +218,7 @@ export default function AiAssistantPage() {
         >
           <Sparkles className="h-5 w-5 shrink-0" aria-hidden />
           <div className="text-sm">
-            <strong>Mock AI Mode.</strong> No <code>OPENAI_API_KEY</code> is configured, so
+            <strong>Mock AI Mode.</strong> No <code>OPENROUTER_API_KEY</code> is configured, so
             responses are generated locally as realistic samples. Add the key to enable live AI.
           </div>
         </div>
@@ -218,11 +274,90 @@ export default function AiAssistantPage() {
             </label>
             <textarea
               id="ai-prompt"
-              className="form-input mb-4 min-h-28 resize-y"
+              className="form-input mb-2 min-h-28 resize-y"
               placeholder={`e.g. "Email the team about Thursday's moderation deadline…"`}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
             />
+
+            <input
+              ref={notesFileInputRef}
+              type="file"
+              accept=".txt,.md,.docx,.pdf"
+              className="hidden"
+              onChange={handleNotesUpload}
+            />
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm mb-4"
+              onClick={() => notesFileInputRef.current?.click()}
+              disabled={extractingNotes}
+            >
+              {extractingNotes ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Reading file…
+                </>
+              ) : (
+                <>
+                  <Upload className="h-4 w-4" aria-hidden /> Upload notes (.txt, .md, .docx, .pdf)
+                </>
+              )}
+            </button>
+            {notesTruncated && (
+              <p className="text-muted -mt-3 mb-4 text-xs">
+                File was long — only the first 15,000 characters were used.
+              </p>
+            )}
+
+            <div className="mb-4">
+              <label className="form-label" htmlFor="ai-style-upload">
+                Style reference <span className="text-muted font-normal">(optional — upload a sample to match its tone/format)</span>
+              </label>
+              <input
+                id="ai-style-upload"
+                ref={styleFileInputRef}
+                type="file"
+                accept=".txt,.md,.docx,.pdf"
+                className="hidden"
+                onChange={handleStyleUpload}
+              />
+              {styleReferenceFileName ? (
+                <div className="flex items-center gap-2 text-sm">
+                  <FileText className="h-4 w-4 text-muted" aria-hidden />
+                  <span>{styleReferenceFileName}</span>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    aria-label="Remove style reference"
+                    onClick={() => { setStyleReference(""); setStyleReferenceFileName(null); }}
+                  >
+                    <X className="h-4 w-4" aria-hidden />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={() => styleFileInputRef.current?.click()}
+                  disabled={extractingStyle}
+                >
+                  {extractingStyle ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Reading file…
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4" aria-hidden /> Upload a sample
+                    </>
+                  )}
+                </button>
+              )}
+              {styleTruncated && (
+                <p className="text-muted mt-1 text-xs">
+                  File was long — only the first 15,000 characters were used.
+                </p>
+              )}
+            </div>
 
             <div className="flex-between">
               <span className="text-muted text-xs">
