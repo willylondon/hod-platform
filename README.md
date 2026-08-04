@@ -44,7 +44,7 @@ Fill in:
 - `NEXT_PUBLIC_SUPABASE_URL` — Your Supabase project URL
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Your Supabase anon/public key
 - `SUPABASE_SERVICE_ROLE_KEY` — Your Supabase service role key (for seeding)
-- `OPENAI_API_KEY` — (Optional) OpenAI API key for AI features
+- `OPENROUTER_API_KEY` — (Optional) OpenRouter API key for AI features
 
 ### Database Setup
 
@@ -84,7 +84,7 @@ npm start
 ## AI Provider Setup
 
 ### OpenAI (Recommended)
-Set `OPENAI_API_KEY` in your `.env.local` file. The AI assistant will use GPT-4 for:
+Set `OPENROUTER_API_KEY` in your `.env.local` file (get one at [openrouter.ai](https://openrouter.ai)). The AI assistant will use `OPENROUTER_MODEL` (defaults to `google/gemini-3.5-flash-lite`) for:
 - Drafting emails
 - Creating meeting agendas
 - Summarizing meeting notes
@@ -94,7 +94,7 @@ Set `OPENAI_API_KEY` in your `.env.local` file. The AI assistant will use GPT-4 
 - Reviewing workflows
 
 ### Mock AI Mode
-If no `OPENAI_API_KEY` is set, the platform runs in Mock AI Mode. The AI assistant returns realistic professional text based on the selected action. The interface is fully functional for testing. A "Mock AI Mode" banner is displayed.
+If no `OPENROUTER_API_KEY` is set, the platform runs in Mock AI Mode. The AI assistant returns realistic professional text based on the selected action. The interface is fully functional for testing. A "Mock AI Mode" banner is displayed.
 
 ## Timetable Integration Plan
 
