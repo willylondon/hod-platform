@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import mammoth from "mammoth";
+import { CanvasFactory } from "pdf-parse/worker";
 import { PDFParse } from "pdf-parse";
 import { enforceRateLimit, requireApiUser } from "@/lib/api-security";
 
@@ -65,7 +66,7 @@ export async function POST(request: Request) {
       text = result.value;
     } else if (ext === ".pdf") {
       const data = new Uint8Array(await file.arrayBuffer());
-      const parser = new PDFParse({ data });
+      const parser = new PDFParse({ data, CanvasFactory });
       try {
         const result = await parser.getText();
         text = result.text.replace(PDF_PAGE_MARKER, "");
