@@ -70,12 +70,13 @@ export default function SettingsPage() {
       school_name: profile.school.trim(),
       department_name: profile.department.trim(),
     };
-    const { error: saveError } = await supabase.from("profiles").update({
+    const { error: saveError } = await supabase.from("profiles").upsert({
+      id: user.id,
       full_name: profile.full_name,
       role: profile.role,
       email: user.email ?? profile.email,
       preferences,
-    }).eq("id", user.id);
+    });
 
     if (saveError) {
       setError(saveError.message);
@@ -83,10 +84,17 @@ export default function SettingsPage() {
       return;
     }
 
-    const { data: organizationData } = await supabase.rpc("set_profile_organization", {
+    const { data: organizationData, error: orgError } = await supabase.rpc("set_profile_organization", {
       p_school_name: profile.school.trim(),
       p_department_name: profile.department.trim(),
     }).maybeSingle();
+
+    if (orgError) {
+      setError(orgError.message);
+      setSaving(false);
+      return;
+    }
+
     const organization = organizationData as { school_id: string; department_id: string } | null;
 
     setProfileLinks(current => ({
