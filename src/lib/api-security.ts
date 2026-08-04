@@ -2,6 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { createServerSupabase } from "@/lib/supabase/server";
+import { isAllowedUserEmail } from "@/lib/access-control";
 
 const rateLimitBuckets = new Map<string, number[]>();
 
@@ -31,6 +32,16 @@ export async function requireApiUser(request: Request) {
     return {
       user: null,
       response: NextResponse.json({ error: "Authentication required" }, { status: 401 }),
+    };
+  }
+
+  if (!isAllowedUserEmail(user.email)) {
+    return {
+      user: null,
+      response: NextResponse.json(
+        { error: "This account is not approved for access" },
+        { status: 403 }
+      ),
     };
   }
 

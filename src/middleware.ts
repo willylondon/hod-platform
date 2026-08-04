@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
+import { isAllowedUserEmail } from "@/lib/access-control";
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
@@ -27,11 +28,21 @@ export async function middleware(request: NextRequest) {
 
   const { data: { user } } = await supabase.auth.getUser();
 
-  const protectedPaths = ["/dashboard", "/tasks", "/workflows", "/observations", "/meetings", "/calendar", "/ai-assistant", "/goals", "/staff", "/settings"];
+  const protectedPaths = ["/dashboard", "/tasks", "/workflows", "/observations", "/meetings", "/calendar", "/ai-assistant", "/goals", "/staff", "/settings", "/onboarding"];
+  const isProtectedPath = protectedPaths.some((path) =>
+    request.nextUrl.pathname.startsWith(path)
+  );
 
-  if (!user && protectedPaths.some(p => request.nextUrl.pathname.startsWith(p))) {
+  if (!user && isProtectedPath) {
     const url = request.nextUrl.clone();
     url.pathname = "/sign-in";
+    return NextResponse.redirect(url);
+  }
+
+  if (user && isProtectedPath && !isAllowedUserEmail(user.email)) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/sign-in";
+    url.searchParams.set("error", "access_denied");
     return NextResponse.redirect(url);
   }
 

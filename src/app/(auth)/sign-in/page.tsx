@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, Loader2, Lock, Mail, Sparkles } from "lucide-react";
+import { AlertCircle, Loader2, Lock, Mail } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
@@ -14,11 +14,21 @@ export default function SignInPage() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
 
-  async function routeAfterAuth(userId: string) {
+  async function routeAfterAuth(userId: string): Promise<boolean> {
+    const accessResponse = await fetch("/api/access", { cache: "no-store" });
+    if (!accessResponse.ok) {
+      await supabase.auth.signOut({ scope: "local" });
+      setError(
+        accessResponse.status === 403
+          ? "This account is not approved to access the app."
+          : "Unable to verify account access. Please try again."
+      );
+      return false;
+    }
+
     // Existing users with a completed profile go straight to the dashboard;
-    // brand-new accounts finish onboarding first.
+    // approved accounts without one finish onboarding first.
     const { data: profile } = await supabase
       .from("profiles")
       .select("id")
@@ -27,16 +37,15 @@ export default function SignInPage() {
 
     router.push(profile ? "/dashboard" : "/onboarding");
     router.refresh();
+    return true;
   }
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setError(null);
-    setInfo(null);
     setLoading(true);
 
     try {
-      // 1. Try to sign in.
       const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email,
         password,
@@ -47,37 +56,7 @@ export default function SignInPage() {
         return;
       }
 
-      // 2. On any sign-in failure, fall back to creating the account (demo mode).
-      const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-
-      if (signUpError) {
-        setError(signUpError.message);
-        return;
-      }
-
-      // Supabase returns a user object with no identities (and no error) when the
-      // email is already registered, to avoid leaking which emails exist. That
-      // means this was actually a wrong password on an existing account, not a
-      // new signup.
-      if (signUpData.user && signUpData.user.identities?.length === 0) {
-        setError("Incorrect email or password.");
-        return;
-      }
-
-      if (signUpData.user && signUpData.session) {
-        await routeAfterAuth(signUpData.user.id);
-        return;
-      }
-
-      if (signUpData.user && !signUpData.session) {
-        setInfo("Account created. Please confirm your email address, then sign in.");
-        return;
-      }
-
-      setError("Unable to sign in. Please try again.");
+      setError("Incorrect email or password.");
     } catch {
       setError("Something went wrong. Please try again.");
     } finally {
@@ -106,21 +85,6 @@ export default function SignInPage() {
         >
           <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
           <span>{error}</span>
-        </div>
-      )}
-
-      {info && (
-        <div
-          className="flex items-start gap-2 rounded-md border px-3 py-2.5 mb-4 text-sm"
-          style={{
-            background: "var(--color-info-bg)",
-            borderColor: "var(--color-info)",
-            color: "var(--color-info)",
-          }}
-          role="status"
-        >
-          <Sparkles className="h-4 w-4 mt-0.5 shrink-0" />
-          <span>{info}</span>
         </div>
       )}
 
@@ -187,8 +151,7 @@ export default function SignInPage() {
       </form>
 
       <p className="text-xs text-muted text-center mt-5 leading-relaxed">
-        Demo: use any email/password to create an account. New accounts are guided through a short
-        onboarding.
+        Access is currently limited to approved testers.
       </p>
     </div>
   );
