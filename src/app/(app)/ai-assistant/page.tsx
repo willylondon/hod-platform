@@ -112,8 +112,8 @@ export default function AiAssistantPage() {
     const formData = new FormData();
     formData.append("file", file);
     const res = await fetch("/api/extract-text", { method: "POST", body: formData });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || "Failed to read file");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || `Failed to read file (${res.status})`);
     return { text: data.text as string, truncated: Boolean(data.truncated) };
   }
 
@@ -175,6 +175,7 @@ export default function AiAssistantPage() {
     pushToHistory(output, true, false);
     setOutput(null);
     setPrompt("");
+    setNotesTruncated(false);
   }
 
   function handleDiscard() {
@@ -329,7 +330,7 @@ export default function AiAssistantPage() {
                     type="button"
                     className="btn btn-ghost btn-sm"
                     aria-label="Remove style reference"
-                    onClick={() => { setStyleReference(""); setStyleReferenceFileName(null); }}
+                    onClick={() => { setStyleReference(""); setStyleReferenceFileName(null); setStyleTruncated(false); }}
                   >
                     <X className="h-4 w-4" aria-hidden />
                   </button>

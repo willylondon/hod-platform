@@ -57,7 +57,8 @@ src/
 │   │   ├── staff/              # Directory with names, subjects, emails
 │   │   └── settings/           # Profile, notifications, AI provider, integration cards
 │   └── api/
-│       └── ai/route.ts         # POST endpoint: mock or OpenAI response
+│       ├── ai/route.ts         # POST endpoint: mock or OpenRouter response
+│       └── extract-text/route.ts # POST endpoint: extracts text from uploaded .txt/.md/.docx/.pdf files
 ├── components/
 │   ├── layout/AppShell.tsx     # Sidebar + mobile nav component
 │   ├── observations/ObservationCard.tsx
@@ -157,7 +158,7 @@ NEXT_PUBLIC_SUPABASE_URL=https://fgcljtcfvaolbvvmequn.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJ... (get from Supabase → Settings → API)
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJ... (get from Supabase → Settings → API)
 OPENROUTER_API_KEY=sk-or-... (optional — enables real AI, omit for mock mode)
-NEXT_PUBLIC_APP_URL=https://hod-platform.vercel.app
+NEXT_PUBLIC_APP_URL=https://hod-platform.vercel.app (optional — used as the HTTP-Referer header on OpenRouter requests, has a sensible fallback)
 ```
 
 ## Design conventions

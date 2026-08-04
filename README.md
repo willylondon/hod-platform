@@ -17,7 +17,7 @@ This is **not** a general task-management app. It is specifically designed for s
 | Styling | Tailwind CSS |
 | Database | Supabase PostgreSQL |
 | Authentication | Supabase Auth |
-| AI | OpenAI (or built-in Mock AI mode) |
+| AI | OpenRouter (or built-in Mock AI mode) |
 | Icons | Lucide React |
 | Forms | React Hook Form + Zod |
 | Charts | Recharts |
@@ -27,10 +27,10 @@ This is **not** a general task-management app. It is specifically designed for s
 ## Setup
 
 ### Prerequisites
-- Node.js 18+
+- Node.js 20+
 - npm 9+
 - Supabase account (free tier)
-- OpenAI API key (optional — mock mode available)
+- OpenRouter API key (optional — mock mode available)
 
 ### Environment Variables
 
@@ -45,6 +45,7 @@ Fill in:
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Your Supabase anon/public key
 - `SUPABASE_SERVICE_ROLE_KEY` — Your Supabase service role key (for seeding)
 - `OPENROUTER_API_KEY` — (Optional) OpenRouter API key for AI features
+- `NEXT_PUBLIC_APP_URL` — (Optional) Public app URL sent as the `HTTP-Referer` header on OpenRouter requests; falls back to a sensible default if omitted
 
 ### Database Setup
 
@@ -135,7 +136,7 @@ A production deployment requires:
 
 ## Known Limitations
 
-- **Mock AI Mode:** Without an OpenAI API key, AI responses are simulated
+- **Mock AI Mode:** Without an OpenRouter API key, AI responses are simulated
 - **Email/Push Notifications:** In-app notifications only. Email and push are future features
 - **External Calendar Sync:** Google Calendar and Outlook integration are planned but not implemented
 - **Timetable Import:** CSV/XLSX upload is a future feature

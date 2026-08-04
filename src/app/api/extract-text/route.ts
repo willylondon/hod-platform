@@ -4,7 +4,9 @@ import { PDFParse } from "pdf-parse";
 
 export const dynamic = "force-dynamic";
 
-const MAX_FILE_BYTES = 5 * 1024 * 1024; // 5MB
+// Vercel's serverless functions cap request bodies at 4.5MB, so this stays under that
+// with headroom for multipart overhead.
+const MAX_FILE_BYTES = 4 * 1024 * 1024; // 4MB
 const MAX_TEXT_CHARS = 15000;
 const PDF_PAGE_MARKER = /^-- \d+ of \d+ --$/gm;
 
@@ -14,6 +16,14 @@ function extensionOf(fileName: string): string {
 }
 
 export async function POST(request: Request) {
+  // Cheap pre-check before buffering the full body via formData(): some clients/proxies
+  // omit or lie about Content-Length, so this is a best-effort fast path, not a replacement
+  // for the post-parse file.size check below.
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_FILE_BYTES) {
+    return NextResponse.json({ error: "File is too large (max 4MB)" }, { status: 400 });
+  }
+
   let formData: FormData;
   try {
     formData = await request.formData();
@@ -27,7 +37,7 @@ export async function POST(request: Request) {
   }
 
   if (file.size > MAX_FILE_BYTES) {
-    return NextResponse.json({ error: "File is too large (max 5MB)" }, { status: 400 });
+    return NextResponse.json({ error: "File is too large (max 4MB)" }, { status: 400 });
   }
 
   const ext = extensionOf(file.name);
