@@ -146,9 +146,9 @@ export default function SettingsPage() {
         <div className="flex items-center gap-4 mb-4"><Bot className="w-5 h-5 text-muted" /><h2 className="text-lg font-semibold">AI Provider</h2></div>
         <select className="form-select w-full max-w-xs" defaultValue="mock">
           <option value="mock">Mock AI Mode</option>
-          <option value="openai" disabled>OpenAI (requires API key)</option>
+          <option value="openrouter" disabled>OpenRouter (requires API key)</option>
         </select>
-        <p className="text-xs text-muted mt-2">Add OPENAI_API_KEY to your environment to enable OpenAI.</p>
+        <p className="text-xs text-muted mt-2">Add OPENROUTER_API_KEY to your environment to enable live AI.</p>
       </div>
 
       {/* Integrations */}

@@ -6,6 +6,7 @@ interface AiRequestBody {
   action?: string;
   context?: string;
   prompt?: string;
+  styleReference?: string;
 }
 
 const ACTION_LABELS: Record<string, string> = {
@@ -227,7 +228,7 @@ Let me know if you would like this adjusted in tone, length, or format.${ctx}${b
 }
 
 export async function GET() {
-  return NextResponse.json({ mock: !process.env.OPENAI_API_KEY });
+  return NextResponse.json({ mock: !process.env.OPENROUTER_API_KEY });
 }
 
 export async function POST(request: Request) {
@@ -241,16 +242,18 @@ export async function POST(request: Request) {
   const action = body.action ?? "draft_email";
   const context = body.context ?? "";
   const prompt = body.prompt ?? "";
+  const styleReference = body.styleReference ?? "";
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = process.env.OPENROUTER_API_KEY;
 
   if (!apiKey) {
     // Simulate a small delay so the UI feels realistic
     await new Promise((r) => setTimeout(r, 900));
-    return NextResponse.json({
-      text: mockResponse(action, context, prompt),
-      mock: true,
-    });
+    const baseText = mockResponse(action, context, prompt);
+    const text = styleReference
+      ? `${baseText}\n\n(Style reference considered: matched tone/format from your uploaded sample.)`
+      : baseText;
+    return NextResponse.json({ text, mock: true });
   }
 
   try {
@@ -258,20 +261,23 @@ export async function POST(request: Request) {
 
     const userPrompt = [
       `Action: ${labelFor(action)}`,
+      styleReference ? `Style/format reference — match this tone and structure:\n${styleReference}` : null,
       context ? `Context: ${context}` : null,
       prompt ? `Request: ${prompt}` : null,
     ]
       .filter(Boolean)
       .join("\n\n");
 
-    const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://hod-platform.vercel.app",
+        "X-Title": "HoD Productivity Platform",
       },
       body: JSON.stringify({
-        model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+        model: process.env.OPENROUTER_MODEL || "google/gemini-3.5-flash-lite",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -283,9 +289,9 @@ export async function POST(request: Request) {
 
     if (!res.ok) {
       const errText = await res.text();
-      console.error("OpenAI API error:", res.status, errText);
+      console.error("OpenRouter API error:", res.status, errText);
       return NextResponse.json(
-        { error: `OpenAI request failed (${res.status})` },
+        { error: `OpenRouter request failed (${res.status})` },
         { status: 502 }
       );
     }

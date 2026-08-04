@@ -28,7 +28,7 @@ A Head of Department at a secondary school who needs to manage:
 | Framework | Next.js 16.2 (App Router) | Turbopack, TypeScript, Tailwind CSS v4 |
 | Database | Supabase PostgreSQL | 23 tables with Row Level Security |
 | Auth | Supabase Auth | Email/password, auto-confirm enabled for demo |
-| AI | Mock mode (default) or OpenAI | `OPENAI_API_KEY` env var enables real AI |
+| AI | Mock mode (default) or OpenRouter | `OPENROUTER_API_KEY` env var enables real AI |
 | Hosting | Vercel | Auto-deploys from `main` branch |
 | Styling | Tailwind CSS v4 + CSS variables | No shadcn/ui — custom design system in globals.css |
 | Icons | Lucide React | All icons from single package |
@@ -57,7 +57,8 @@ src/
 │   │   ├── staff/              # Directory with names, subjects, emails
 │   │   └── settings/           # Profile, notifications, AI provider, integration cards
 │   └── api/
-│       └── ai/route.ts         # POST endpoint: mock or OpenAI response
+│       ├── ai/route.ts         # POST endpoint: mock or OpenRouter response
+│       └── extract-text/route.ts # POST endpoint: extracts text from uploaded .txt/.md/.docx/.pdf files
 ├── components/
 │   ├── layout/AppShell.tsx     # Sidebar + mobile nav component
 │   ├── observations/ObservationCard.tsx
@@ -116,7 +117,7 @@ The seed script at `supabase/seed.ts` contains full data but ran into API auth i
 5. **Observation AI feedback** — Wire the "Generate Feedback" button to the AI API route
 
 ### Medium-term (next phase)
-6. **Real OpenAI integration** — Add `OPENAI_API_KEY` env var, remove mock mode banner
+6. **Real AI integration** — Add `OPENROUTER_API_KEY` env var, remove mock mode banner
 7. **Notification center** — Implement in-app notification bell with dropdown
 8. **Dashboard live data** — Replace empty states with real seeded data
 9. **Multi-role support** — Enable teacher, senior leader, admin roles (schema ready)
@@ -156,8 +157,8 @@ npx vercel deploy --prod --yes
 NEXT_PUBLIC_SUPABASE_URL=https://fgcljtcfvaolbvvmequn.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJ... (get from Supabase → Settings → API)
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJ... (get from Supabase → Settings → API)
-OPENAI_API_KEY=sk-... (optional — enables real AI, omit for mock mode)
-NEXT_PUBLIC_APP_URL=https://hod-platform.vercel.app
+OPENROUTER_API_KEY=sk-or-... (optional — enables real AI, omit for mock mode)
+NEXT_PUBLIC_APP_URL=https://hod-platform.vercel.app (optional — used as the HTTP-Referer header on OpenRouter requests, has a sensible fallback)
 ```
 
 ## Design conventions
