@@ -75,6 +75,7 @@ export default function OnboardingPage() {
         email: form.notifications_email,
         in_app: true,
         push: false,
+        telegram: false,
         deadline_reminders: true,
         daily_task_digest: true,
         weekly_task_digest: true,

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { createAdminSupabase } from "@/lib/supabase/admin";
 import { normalizeNotificationPreferences } from "@/lib/notification-preferences";
-import { pushStatusCode, sendReminderEmail, sendReminderPush } from "@/lib/reminder-delivery";
+import {
+  pushStatusCode,
+  sendReminderEmail,
+  sendReminderPush,
+  sendReminderTelegram,
+  TelegramDeliveryError,
+} from "@/lib/reminder-delivery";
 import {
   localDateKey,
   reminderCopy,
@@ -17,7 +23,8 @@ export const maxDuration = 60;
 type ProfileRow = { id: string; email: string; full_name: string };
 type SettingsRow = { user_id: string; notification_preferences: unknown };
 type PushRow = { id: string; user_id: string; endpoint: string; p256dh: string; auth: string };
-type DeliveryRow = { user_id: string; channel: "email" | "push"; delivery_key: string };
+type TelegramRow = { id: string; user_id: string; chat_id: string };
+type DeliveryRow = { user_id: string; channel: "email" | "push" | "telegram"; delivery_key: string };
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
@@ -53,6 +60,29 @@ function emailHtml(
   return `<!doctype html><html><body style="margin:0;background:#f4f6f8;font-family:Arial,sans-serif;color:#1f2933"><div style="max-width:600px;margin:0 auto;padding:32px 20px"><div style="background:#fff;border-radius:12px;padding:28px;border:1px solid #dde3e8"><p style="margin-top:0;color:#697586;font-size:14px">HoD Productivity Platform</p><h1 style="font-size:24px;margin:0 0 12px">${heading}</h1><p>Hello ${escapeHtml(profile.full_name || "there")},</p><p>${intro}</p><ul style="padding-left:20px">${list}</ul>${items.length < total ? `<p>And ${total - items.length} more.</p>` : ""}<p style="margin:26px 0 0"><a href="${appUrl}/tasks" style="display:inline-block;background:#294f71;color:#fff;text-decoration:none;padding:11px 18px;border-radius:8px;font-weight:600">Review your tasks</a></p></div><p style="font-size:12px;color:#697586;text-align:center">Manage reminder preferences in Settings.</p></div></body></html>`;
 }
 
+function telegramText(
+  reminders: ScheduledTaskReminder[],
+  outstanding: Task[],
+  timezone: string,
+  mode: "deadline" | "daily" | "weekly"
+) {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || "https://hod-platform.vercel.app";
+  const digest = mode !== "deadline";
+  const tasks = (digest ? outstanding : reminders.map((item) => item.task)).slice(0, 10);
+  const title = mode === "weekly"
+    ? "📋 Weekly task overview"
+    : mode === "daily"
+      ? "📌 Daily task reminder"
+      : "⏰ Upcoming task deadlines";
+  const lines = tasks.map((task) => {
+    const due = task.deadline ? ` — due ${formatDeadline(task.deadline, timezone)}` : "";
+    return `• ${task.title}${due}`;
+  });
+  const total = digest ? outstanding.length : reminders.length;
+  if (tasks.length < total) lines.push(`• And ${total - tasks.length} more`);
+  return `${title}\n\n${lines.join("\n")}\n\nReview your tasks: ${appUrl}/tasks`;
+}
+
 export async function GET(request: Request) {
   const secret = process.env.CRON_SECRET;
   if (!secret || request.headers.get("authorization") !== `Bearer ${secret}`) {
@@ -61,15 +91,23 @@ export async function GET(request: Request) {
 
   const admin = createAdminSupabase();
   const now = new Date();
-  const [{ data: profiles, error: profileError }, { data: settings, error: settingsError }, { data: tasks, error: taskError }, { data: subscriptions, error: pushError }, { data: deliveries, error: deliveryError }] = await Promise.all([
+  const [
+    { data: profiles, error: profileError },
+    { data: settings, error: settingsError },
+    { data: tasks, error: taskError },
+    { data: subscriptions, error: pushError },
+    { data: telegramConnections, error: telegramError },
+    { data: deliveries, error: deliveryError },
+  ] = await Promise.all([
     admin.from("profiles").select("id,email,full_name"),
     admin.from("settings").select("user_id,notification_preferences"),
     admin.from("tasks").select("*").not("status", "in", '("completed","cancelled")'),
     admin.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth"),
+    admin.from("telegram_connections").select("id,user_id,chat_id").not("chat_id", "is", null),
     admin.from("notification_deliveries").select("user_id,channel,delivery_key").gte("created_at", new Date(now.getTime() - 14 * 86_400_000).toISOString()),
   ]);
 
-  const dataError = profileError || settingsError || taskError || pushError || deliveryError;
+  const dataError = profileError || settingsError || taskError || pushError || telegramError || deliveryError;
   if (dataError) {
     console.error("task reminder query error", dataError);
     return NextResponse.json({ error: "Could not load reminders" }, { status: 500 });
@@ -84,11 +122,15 @@ export async function GET(request: Request) {
   for (const subscription of subscriptions as PushRow[] | null ?? []) {
     pushByUser.set(subscription.user_id, [...(pushByUser.get(subscription.user_id) ?? []), subscription]);
   }
+  const telegramByUser = new Map(
+    (telegramConnections as TelegramRow[] | null ?? []).map((connection) => [connection.user_id, connection])
+  );
   const delivered = new Set((deliveries as DeliveryRow[] | null ?? []).map((row) => `${row.user_id}:${row.channel}:${row.delivery_key}`));
 
   let inAppCount = 0;
   let emailCount = 0;
   let pushCount = 0;
+  let telegramCount = 0;
   let failureCount = 0;
 
   for (const profile of profiles as ProfileRow[] | null ?? []) {
@@ -214,7 +256,36 @@ export async function GET(request: Request) {
         }
       }
     }
+
+    const telegramConnection = telegramByUser.get(profile.id);
+    if (process.env.TELEGRAM_BOT_TOKEN && preferences.telegram && telegramConnection && (reminders.length > 0 || shouldSendDaily || shouldSendWeekly)) {
+      const kind = shouldSendWeekly ? "weekly" : shouldSendDaily ? "daily" : "deadline";
+      const deliveryKey = `task-telegram:${telegramConnection.id}:${kind}:${dateKey}`;
+      if (!delivered.has(`${profile.id}:telegram:${deliveryKey}`)) {
+        try {
+          const providerId = await sendReminderTelegram({
+            chatId: telegramConnection.chat_id,
+            text: telegramText(reminders, userTasks, preferences.timezone, kind),
+          });
+          const { error } = await admin.from("notification_deliveries").insert({
+            user_id: profile.id,
+            channel: "telegram",
+            delivery_key: deliveryKey,
+            provider_id: providerId,
+          });
+          if (error) throw error;
+          delivered.add(`${profile.id}:telegram:${deliveryKey}`);
+          telegramCount += 1;
+        } catch (error) {
+          failureCount += 1;
+          if (error instanceof TelegramDeliveryError && error.status === 403) {
+            await admin.from("telegram_connections").delete().eq("id", telegramConnection.id);
+          }
+          console.error("task reminder Telegram error", { userId: profile.id, error });
+        }
+      }
+    }
   }
 
-  return NextResponse.json({ ok: failureCount === 0, inAppCount, emailCount, pushCount, failureCount });
+  return NextResponse.json({ ok: failureCount === 0, inAppCount, emailCount, pushCount, telegramCount, failureCount });
 }

@@ -18,6 +18,18 @@ type PushInput = {
   url: string;
 };
 
+type TelegramInput = {
+  chatId: string;
+  text: string;
+};
+
+export class TelegramDeliveryError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "TelegramDeliveryError";
+  }
+}
+
 export async function sendReminderEmail(input: EmailInput): Promise<string | null> {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error("RESEND_API_KEY is not configured");
@@ -77,4 +89,32 @@ export function pushStatusCode(error: unknown): number | null {
     return typeof code === "number" ? code : null;
   }
   return null;
+}
+
+export async function sendReminderTelegram(input: TelegramInput): Promise<string | null> {
+  const botToken = process.env.TELEGRAM_BOT_TOKEN;
+  if (!botToken) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
+
+  const response = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      chat_id: input.chatId,
+      text: input.text,
+      link_preview_options: { is_disabled: true },
+    }),
+  });
+  const payload = await response.json().catch(() => ({})) as {
+    ok?: boolean;
+    description?: string;
+    result?: { message_id?: number };
+  };
+
+  if (!response.ok || payload.ok === false) {
+    throw new TelegramDeliveryError(
+      payload.description || `Telegram returned ${response.status}`,
+      response.status
+    );
+  }
+  return payload.result?.message_id ? String(payload.result.message_id) : null;
 }

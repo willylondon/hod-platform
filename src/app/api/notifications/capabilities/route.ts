@@ -10,5 +10,6 @@ export async function GET(request: Request) {
   return NextResponse.json({
     emailConfigured: Boolean(process.env.RESEND_API_KEY),
     pushConfigured: Boolean(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY),
+    telegramConfigured: Boolean(process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_BOT_USERNAME),
   });
 }

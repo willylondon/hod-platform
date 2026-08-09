@@ -9,12 +9,20 @@ import {
   type NotificationPreferences,
 } from "@/lib/notification-preferences";
 import Link from "next/link";
-import { User, Bell, Bot, Calendar, Upload, Shield, Save, Check, AlertCircle, Mail, Smartphone } from "lucide-react";
+import { User, Bell, Bot, Calendar, Upload, Shield, Save, Check, AlertCircle, Mail, Smartphone, Send } from "lucide-react";
 
 type ProfilePreferences = {
   school_name?: string;
   department_name?: string;
   [key: string]: unknown;
+};
+
+type TelegramConnection = {
+  configured: boolean;
+  connected: boolean;
+  botUsername?: string;
+  telegramUsername?: string | null;
+  firstName?: string | null;
 };
 
 export default function SettingsPage() {
@@ -33,6 +41,8 @@ export default function SettingsPage() {
   const [isIOS, setIsIOS] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
   const [emailConfigured, setEmailConfigured] = useState(false);
+  const [telegramConnection, setTelegramConnection] = useState<TelegramConnection>({ configured: false, connected: false });
+  const [telegramBusy, setTelegramBusy] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -74,6 +84,30 @@ export default function SettingsPage() {
       .then((response) => response.ok ? response.json() : null)
       .then((capabilities: { emailConfigured?: boolean } | null) => setEmailConfigured(Boolean(capabilities?.emailConfigured)))
       .catch(() => setEmailConfigured(false));
+  }, []);
+
+  useEffect(() => {
+    async function refreshTelegramConnection() {
+      const response = await fetch("/api/telegram/connection");
+      if (!response.ok) return;
+      const connection = await response.json() as TelegramConnection;
+      setTelegramConnection(connection);
+      if (connection.connected) {
+        setNotificationPreferences((current) => current.telegram ? current : { ...current, telegram: true });
+      }
+    }
+
+    refreshTelegramConnection().catch(() => null);
+    const handleFocus = () => refreshTelegramConnection().catch(() => null);
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") handleFocus();
+    };
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
   }, []);
 
   useEffect(() => {
@@ -258,6 +292,38 @@ export default function SettingsPage() {
     }
   }
 
+  async function connectTelegram() {
+    setTelegramBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/telegram/connection", { method: "POST" });
+      const payload = await response.json() as { connectUrl?: string; error?: string };
+      if (!response.ok || !payload.connectUrl) {
+        throw new Error(payload.error || "Could not start the Telegram connection.");
+      }
+      window.location.assign(payload.connectUrl);
+    } catch (telegramError) {
+      setError(telegramError instanceof Error ? telegramError.message : "Could not connect Telegram.");
+      setTelegramBusy(false);
+    }
+  }
+
+  async function disconnectTelegram() {
+    setTelegramBusy(true);
+    setError(null);
+    try {
+      const response = await fetch("/api/telegram/connection", { method: "DELETE" });
+      const payload = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Could not disconnect Telegram.");
+      setTelegramConnection((current) => ({ ...current, connected: false, telegramUsername: null, firstName: null }));
+      setNotificationPreferences((current) => ({ ...current, telegram: false }));
+    } catch (telegramError) {
+      setError(telegramError instanceof Error ? telegramError.message : "Could not disconnect Telegram.");
+    } finally {
+      setTelegramBusy(false);
+    }
+  }
+
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-32 mb-6" /><div className="space-y-4">{[1,2,3].map(i => <div key={i} className="skeleton h-16" />)}</div></div>;
 
   return (
@@ -326,6 +392,28 @@ export default function SettingsPage() {
               <p className="mt-3 rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">On iPhone, open this page in Safari, tap Share, choose <strong>Add to Home Screen</strong>, then open the installed app to enable notifications.</p>
             )}
             {!pushSupported && <p className="mt-2 text-xs text-muted">This browser does not support phone notifications.</p>}
+          </div>
+          <div className={`rounded-md border border-border px-3 py-3 ${!telegramConnection.configured ? "opacity-50" : ""}`}>
+            <div className="flex-between gap-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <Send className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden />
+                <div>
+                  <p className="text-sm font-medium">Telegram reminders</p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {telegramConnection.connected
+                      ? `Connected${telegramConnection.telegramUsername ? ` as @${telegramConnection.telegramUsername}` : telegramConnection.firstName ? ` as ${telegramConnection.firstName}` : ""}. Task reminders will arrive in this private chat.`
+                      : telegramConnection.configured
+                        ? "Connect the HoD Platform bot, then press Start in Telegram."
+                        : "The Telegram reminder bot is awaiting setup."}
+                  </p>
+                </div>
+              </div>
+              {telegramConnection.connected ? (
+                <button type="button" className="btn btn-secondary btn-sm shrink-0" disabled={telegramBusy} onClick={disconnectTelegram}>{telegramBusy ? "Working…" : "Disconnect"}</button>
+              ) : (
+                <button type="button" className="btn btn-primary btn-sm shrink-0" disabled={telegramBusy || !telegramConnection.configured} onClick={connectTelegram}>{telegramBusy ? "Connecting…" : "Connect"}</button>
+              )}
+            </div>
           </div>
           <NotificationToggle
             label="Deadline alerts"

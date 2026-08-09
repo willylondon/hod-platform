@@ -2,6 +2,7 @@ export type NotificationPreferences = {
   email: boolean;
   in_app: boolean;
   push: boolean;
+  telegram: boolean;
   deadline_reminders: boolean;
   daily_task_digest: boolean;
   weekly_task_digest: boolean;
@@ -12,6 +13,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   email: true,
   in_app: true,
   push: false,
+  telegram: false,
   deadline_reminders: true,
   daily_task_digest: true,
   weekly_task_digest: true,
@@ -27,6 +29,7 @@ export function normalizeNotificationPreferences(value: unknown): NotificationPr
     email: saved.email ?? DEFAULT_NOTIFICATION_PREFERENCES.email,
     in_app: saved.in_app ?? DEFAULT_NOTIFICATION_PREFERENCES.in_app,
     push: saved.push ?? DEFAULT_NOTIFICATION_PREFERENCES.push,
+    telegram: saved.telegram ?? DEFAULT_NOTIFICATION_PREFERENCES.telegram,
     deadline_reminders: saved.deadline_reminders ?? DEFAULT_NOTIFICATION_PREFERENCES.deadline_reminders,
     daily_task_digest: saved.daily_task_digest ?? DEFAULT_NOTIFICATION_PREFERENCES.daily_task_digest,
     weekly_task_digest: saved.weekly_task_digest ?? DEFAULT_NOTIFICATION_PREFERENCES.weekly_task_digest,
