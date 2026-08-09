@@ -1,19 +1,38 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import { ChevronLeft, ChevronRight, Download, Info, Loader2, Plus, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  CalendarSync,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Info,
+  Loader2,
+  Plus,
+  RefreshCw,
+  Unplug,
+  X,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
-type CalendarSource = "event" | "meeting" | "observation" | "task";
+type CalendarSource = "event" | "meeting" | "observation" | "task" | "google";
 type DisplayEvent = {
   id: string;
   title: string;
   date: string;
   source: CalendarSource;
+};
+type GoogleCalendarPayload = {
+  configured: boolean;
+  connected: boolean;
+  lastSyncedAt?: string | null;
+  events?: { id: string; title: string; date: string }[];
+  error?: string;
 };
 
 const SOURCE_STYLES: Record<CalendarSource, string> = {
@@ -21,6 +40,7 @@ const SOURCE_STYLES: Record<CalendarSource, string> = {
   meeting: "bg-accent-light/40 text-text",
   observation: "bg-success-bg text-success",
   task: "bg-warning-bg text-warning",
+  google: "bg-[#e8f0fe] text-[#1967d2]",
 };
 
 function dateKey(year: number, month: number, day: number) {
@@ -31,62 +51,45 @@ function escapeIcs(value: string) {
   return value.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/,/g, "\\,").replace(/;/g, "\\;");
 }
 
-function unescapeIcs(value: string) {
-  return value.replace(/\\n/gi, "\n").replace(/\\([\\,;])/g, "$1");
-}
-
-function parseIcs(text: string): { title: string; date: string }[] {
-  const lines = text.replace(/\r\n[ \t]/g, "").split(/\r?\n/);
-  const parsed: { title: string; date: string }[] = [];
-  let current: { title?: string; date?: string } | null = null;
-
-  for (const line of lines) {
-    if (line === "BEGIN:VEVENT") current = {};
-    else if (line === "END:VEVENT") {
-      if (current?.title && current.date) parsed.push({ title: current.title, date: current.date });
-      current = null;
-    } else if (current && line.startsWith("SUMMARY")) {
-      current.title = unescapeIcs(line.slice(line.indexOf(":") + 1)).trim();
-    } else if (current && line.startsWith("DTSTART")) {
-      const raw = line.slice(line.indexOf(":") + 1).trim();
-      const match = raw.match(/^(\d{4})(\d{2})(\d{2})/);
-      if (match) current.date = `${match[1]}-${match[2]}-${match[3]}`;
-    }
-  }
-  return parsed;
-}
-
 export default function CalendarPage() {
-  const today = new Date();
+  const [today] = useState(() => new Date());
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [events, setEvents] = useState<DisplayEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [importing, setImporting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [newEvent, setNewEvent] = useState({ title: "", date: dateKey(today.getFullYear(), today.getMonth(), today.getDate()) });
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarPayload>({ configured: false, connected: false });
 
-  useEffect(() => {
-    loadEvents();
-  }, []);
-
-  async function loadEvents() {
-    setLoading(true);
+  const loadEvents = useCallback(async (showSyncMessage = false) => {
+    if (showSyncMessage) setSyncing(true);
+    else setLoading(true);
+    setError(null);
     const supabase = createClient();
-    const [customResult, meetingsResult, observationsResult, tasksResult, staffResult] = await Promise.all([
+    const timeMin = new Date(Date.UTC(year, month, 1)).toISOString();
+    const timeMax = new Date(Date.UTC(year, month + 1, 1)).toISOString();
+    const googleRequest = fetch(`/api/google-calendar/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`, {
+      cache: "no-store",
+    });
+    const [customResult, meetingsResult, observationsResult, tasksResult, staffResult, googleResponse] = await Promise.all([
       supabase.from("calendar_events").select("id, title, start_date"),
       supabase.from("meetings").select("id, title, date"),
       supabase.from("observations").select("id, scheduled_date, teacher_id"),
       supabase.from("tasks").select("id, title, deadline").not("deadline", "is", null),
       supabase.from("staff").select("id, full_name"),
+      googleRequest,
     ]);
 
+    const googlePayload = await googleResponse.json() as GoogleCalendarPayload;
+    setGoogleCalendar(googlePayload);
     const firstError = [customResult.error, meetingsResult.error, observationsResult.error, tasksResult.error, staffResult.error].find(Boolean);
     if (firstError) setError(firstError.message);
+    else if (!googleResponse.ok && googlePayload.error) setError(googlePayload.error);
     const staffById = new Map((staffResult.data ?? []).map(member => [member.id, member.full_name]));
 
     const combined: DisplayEvent[] = [
@@ -97,11 +100,33 @@ export default function CalendarPage() {
         return { id: `observation-${row.id}`, title: `Observation${teacherName ? `: ${teacherName}` : ""}`, date: row.scheduled_date as string, source: "observation" as const };
       }),
       ...(tasksResult.data ?? []).filter(row => row.deadline).map(row => ({ id: `task-${row.id}`, title: row.title, date: row.deadline!.slice(0, 10), source: "task" as const })),
+      ...(googlePayload.events ?? []).map(event => ({ id: `google-${event.id}`, title: event.title, date: event.date, source: "google" as const })),
     ];
 
     setEvents(combined);
+    if (showSyncMessage && googlePayload.connected && googleResponse.ok) {
+      setMessage("Google Calendar is up to date.");
+    }
     setLoading(false);
-  }
+    setSyncing(false);
+  }, [month, year]);
+
+  useEffect(() => {
+    queueMicrotask(() => void loadEvents());
+  }, [loadEvents]);
+
+  useEffect(() => {
+    const result = new URLSearchParams(window.location.search).get("googleCalendar");
+    if (!result) return;
+    queueMicrotask(() => {
+      if (result === "connected") setMessage("Google Calendar connected. Your events now sync automatically.");
+      else if (result === "cancelled") setMessage("Google Calendar connection was cancelled.");
+      else if (result === "not_configured") setError("Google Calendar setup is not complete yet.");
+      else if (result === "session_expired") setError("Your session expired. Sign in and connect Google Calendar again.");
+      else setError("Google Calendar could not be connected. Please try again.");
+    });
+    window.history.replaceState({}, "", window.location.pathname);
+  }, []);
 
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
@@ -116,7 +141,7 @@ export default function CalendarPage() {
 
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };
-  const isToday = (d: number) => year === today.getFullYear() && month === today.getMonth() && d === today.getDate();
+  const isToday = (day: number) => year === today.getFullYear() && month === today.getMonth() && day === today.getDate();
 
   async function createEvent(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -147,11 +172,11 @@ export default function CalendarPage() {
     setNewEvent(current => ({ ...current, title: "" }));
     setShowForm(false);
     setSaving(false);
-    setMessage("Event added to your calendar.");
+    setMessage("Event added to your HoD calendar.");
   }
 
   function exportCalendar() {
-    const body = events.map(event => {
+    const body = events.filter(event => event.source !== "google").map(event => {
       const compactDate = event.date.replaceAll("-", "");
       return ["BEGIN:VEVENT", `UID:${escapeIcs(event.id)}@hod-platform`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`, `DTSTART;VALUE=DATE:${compactDate}`, `SUMMARY:${escapeIcs(event.title)}`, "END:VEVENT"].join("\r\n");
     }).join("\r\n");
@@ -162,63 +187,67 @@ export default function CalendarPage() {
     link.download = `hod-calendar-${new Date().toISOString().slice(0, 10)}.ics`;
     link.click();
     URL.revokeObjectURL(url);
-    setMessage(`Exported ${events.length} calendar item${events.length === 1 ? "" : "s"}.`);
+    setMessage("Exported your HoD calendar items.");
   }
 
-  async function importCalendar(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    event.target.value = "";
-    if (!file) return;
-    setImporting(true);
+  async function disconnectGoogleCalendar() {
+    setDisconnecting(true);
     setError(null);
-    setMessage(null);
-    const parsed = parseIcs(await file.text());
-    if (!parsed.length) {
-      setError("No calendar events were found in that .ics file.");
-      setImporting(false);
+    const response = await fetch("/api/google-calendar/connection", { method: "DELETE" });
+    const payload = await response.json() as { error?: string };
+    if (!response.ok) {
+      setError(payload.error || "Could not disconnect Google Calendar.");
+      setDisconnecting(false);
       return;
     }
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) {
-      setError("Your session has expired. Please sign in again.");
-      setImporting(false);
-      return;
-    }
-    const { error: importError } = await supabase.from("calendar_events").insert(parsed.map(item => ({
-      title: item.title,
-      start_date: item.date,
-      all_day: true,
-      event_type: "custom",
-      created_by: user.id,
-    })));
-    if (importError) {
-      setError(importError.message);
-      setImporting(false);
-      return;
-    }
-    await loadEvents();
-    setImporting(false);
-    setMessage(`Imported ${parsed.length} calendar event${parsed.length === 1 ? "" : "s"}.`);
+    setGoogleCalendar(current => ({ ...current, connected: false, events: [] }));
+    setEvents(current => current.filter(event => event.source !== "google"));
+    setMessage("Google Calendar disconnected.");
+    setDisconnecting(false);
   }
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto animate-fade-in">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-6">
-        <div><h1 className="text-2xl font-bold">Calendar</h1><p className="text-sm text-muted">{MONTHS[month]} {year} · tasks, meetings and observations included</p></div>
+        <div><h1 className="text-2xl font-bold">Calendar</h1><p className="text-sm text-muted">{MONTHS[month]} {year} · HoD work and Google events together</p></div>
         <div className="flex flex-wrap gap-2">
-          <input ref={fileInputRef} type="file" accept=".ics,text/calendar" className="hidden" onChange={importCalendar} />
-          <button type="button" className="btn btn-secondary" onClick={() => fileInputRef.current?.click()} disabled={importing}>{importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />} Import .ics</button>
-          <button type="button" className="btn btn-secondary" onClick={exportCalendar} disabled={!events.length}><Download className="w-4 h-4" /> Export .ics</button>
+          <button type="button" className="btn btn-secondary" onClick={exportCalendar} disabled={!events.some(event => event.source !== "google")}><Download className="w-4 h-4" /> Export HoD calendar</button>
           <button type="button" className="btn btn-primary" onClick={() => setShowForm(true)}><Plus className="w-4 h-4" /> New Event</button>
         </div>
       </div>
 
+      <div className="card mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-start gap-3">
+          <CalendarSync className="mt-0.5 h-5 w-5 shrink-0 text-[#1967d2]" aria-hidden />
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-semibold">Google Calendar</h2>
+              {googleCalendar.connected && <span className="badge badge-low"><Check className="h-3 w-3" /> Connected</span>}
+            </div>
+            <p className="mt-1 text-sm text-muted">
+              {googleCalendar.connected
+                ? "Events sync automatically whenever you open this calendar. Access is read-only."
+                : googleCalendar.configured
+                  ? "Connect once—no calendar files or repeated uploads required."
+                  : "Google Calendar is awaiting administrator setup."}
+            </p>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-2 sm:shrink-0">
+          {googleCalendar.connected ? <>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => void loadEvents(true)} disabled={syncing}><RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />{syncing ? "Syncing…" : "Sync now"}</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={disconnectGoogleCalendar} disabled={disconnecting}><Unplug className="h-4 w-4" />{disconnecting ? "Disconnecting…" : "Disconnect"}</button>
+          </> : googleCalendar.configured
+            ? <a className="btn btn-primary btn-sm" href="/api/google-calendar/connect"><CalendarSync className="h-4 w-4" />Connect Google</a>
+            : <button type="button" className="btn btn-primary btn-sm" disabled><CalendarSync className="h-4 w-4" />Connect Google</button>}
+        </div>
+      </div>
+
       {showForm && <form className="card mb-4" onSubmit={createEvent}>
-        <div className="mb-3 flex-between"><h2 className="text-base font-semibold">New Event</h2><button type="button" className="btn btn-ghost btn-icon" onClick={() => setShowForm(false)} aria-label="Close new event form"><X className="w-4 h-4" /></button></div>
+        <div className="mb-3 flex-between"><h2 className="text-base font-semibold">New HoD Event</h2><button type="button" className="btn btn-ghost btn-icon" onClick={() => setShowForm(false)} aria-label="Close new event form"><X className="w-4 h-4" /></button></div>
         <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto] sm:items-end">
-          <div><label htmlFor="calendar-event-title" className="form-label">Event title</label><input id="calendar-event-title" className="form-input" value={newEvent.title} onChange={e => setNewEvent(value => ({ ...value, title: e.target.value }))} required autoFocus /></div>
-          <div><label htmlFor="calendar-event-date" className="form-label">Date</label><input id="calendar-event-date" type="date" className="form-input" value={newEvent.date} onChange={e => setNewEvent(value => ({ ...value, date: e.target.value }))} required /></div>
+          <div><label htmlFor="calendar-event-title" className="form-label">Event title</label><input id="calendar-event-title" className="form-input" value={newEvent.title} onChange={event => setNewEvent(value => ({ ...value, title: event.target.value }))} required autoFocus /></div>
+          <div><label htmlFor="calendar-event-date" className="form-label">Date</label><input id="calendar-event-date" type="date" className="form-input" value={newEvent.date} onChange={event => setNewEvent(value => ({ ...value, date: event.target.value }))} required /></div>
           <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : "Add event"}</button>
         </div>
       </form>}
@@ -233,10 +262,10 @@ export default function CalendarPage() {
       </div>
 
       {loading ? <div className="skeleton h-[520px] w-full" /> : <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden">
-        {DAYS.map(d => <div key={d} className="p-2 text-center text-xs font-semibold bg-surface text-muted">{d}</div>)}
-        {Array.from({ length: startOffset }).map((_, i) => <div key={`empty-${i}`} className="p-2 min-h-[80px] bg-surface-alt" />)}
-        {Array.from({ length: daysInMonth }).map((_, i) => {
-          const day = i + 1;
+        {DAYS.map(day => <div key={day} className="p-2 text-center text-xs font-semibold bg-surface text-muted">{day}</div>)}
+        {Array.from({ length: startOffset }).map((_, index) => <div key={`empty-${index}`} className="p-2 min-h-[80px] bg-surface-alt" />)}
+        {Array.from({ length: daysInMonth }).map((_, index) => {
+          const day = index + 1;
           const dayEvents = eventsByDate.get(dateKey(year, month, day)) ?? [];
           return (
             <div key={day} className={`p-2 min-h-[80px] bg-surface border-t border-border text-sm ${isToday(day) ? "ring-2 ring-primary ring-inset" : ""}`}>
@@ -250,7 +279,7 @@ export default function CalendarPage() {
 
       <div className="mt-6 card p-4 flex items-start gap-3 bg-surface-alt">
         <Info className="w-5 h-5 text-muted mt-0.5 shrink-0" />
-        <div className="text-sm text-muted"><p className="font-medium text-text">Calendar transfer is ready</p><p className="mt-1">Export this calendar as an .ics file for Google Calendar, Outlook or Apple Calendar, or import an .ics file from any of those services. Tasks, meetings and scheduled observations appear automatically.</p></div>
+        <div className="text-sm text-muted"><p className="font-medium text-text">Automatic calendar sync</p><p className="mt-1">Google events are loaded securely and are never copied into an upload file. HoD tasks, meetings and observations continue to appear automatically beside them.</p></div>
       </div>
     </div>
   );

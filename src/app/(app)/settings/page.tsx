@@ -451,8 +451,8 @@ export default function SettingsPage() {
         <h2 className="text-lg font-semibold mb-4">Integrations</h2>
         <div className="space-y-4">
           {[
-            { name: "Google Calendar", desc: "Import or export calendar events", icon: Calendar, available: true },
-            { name: "Microsoft Outlook", desc: "Import or export calendar events", icon: Calendar, available: true },
+            { name: "Google Calendar", desc: "Connect once and sync events automatically", icon: Calendar, available: true },
+            { name: "Microsoft Outlook", desc: "Automatic calendar sync", icon: Calendar, available: false },
             { name: "Timetable Upload", desc: "CSV / XLSX import", icon: Upload, available: false },
           ].map((int, i) => (
             <div key={i} className="flex items-center gap-3 p-3 rounded-md border border-border bg-surface-alt">
