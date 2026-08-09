@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 
@@ -8,6 +8,16 @@ export const metadata: Metadata = {
   title: "HoD Productivity Platform",
   description: "AI-powered leadership assistant for Heads of Department",
   metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
+  applicationName: "HoD Platform",
+  appleWebApp: {
+    capable: true,
+    title: "HoD Platform",
+    statusBarStyle: "default",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#294f71",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

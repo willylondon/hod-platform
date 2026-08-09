@@ -18,11 +18,13 @@ export default function OnboardingPage() {
     academic_year: "2026-2027", current_term: "Term 1",
     working_days: ["Monday","Tuesday","Wednesday","Thursday","Friday"],
     preferred_hours_start: "08:00", preferred_hours_end: "16:00",
-    notifications_in_app: true, notifications_email: false,
+    notifications_in_app: true, notifications_email: true,
     priorities: "",
   });
 
-  const update = (field: string, value: any) => setForm(f => ({ ...f, [field]: value }));
+  function update<K extends keyof typeof form>(field: K, value: (typeof form)[K]) {
+    setForm((current) => ({ ...current, [field]: value }));
+  }
   const toggleDay = (day: string) => update("working_days", form.working_days.includes(day) ? form.working_days.filter(d => d !== day) : [...form.working_days, day]);
 
   async function finish() {
@@ -69,7 +71,15 @@ export default function OnboardingPage() {
 
     const { error: settingsError } = await supabase.from("settings").upsert({
       user_id: user.id,
-      notification_preferences: { email: form.notifications_email, in_app: true, push: false },
+      notification_preferences: {
+        email: form.notifications_email,
+        in_app: true,
+        push: false,
+        deadline_reminders: true,
+        daily_task_digest: true,
+        weekly_task_digest: true,
+        timezone: "America/Jamaica",
+      },
     });
     if (settingsError) {
       setError(`We couldn't save your settings: ${settingsError.message}`);
@@ -98,7 +108,7 @@ export default function OnboardingPage() {
           {step === 0 && (
             <>
               <h1 className="text-xl font-bold mb-4">Welcome, Head of Department</h1>
-              <p className="text-sm text-muted mb-6">Let's set up your leadership platform in a few steps.</p>
+              <p className="text-sm text-muted mb-6">Let&apos;s set up your leadership platform in a few steps.</p>
               <div><label className="form-label">Your Full Name</label><input className="form-input" value={form.full_name} onChange={e => update("full_name", e.target.value)} placeholder="Dr. Sarah Williams" /></div>
             </>
           )}

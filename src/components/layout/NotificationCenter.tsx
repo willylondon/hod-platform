@@ -20,12 +20,6 @@ function localDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function weekKey(date: Date): string {
-  const start = new Date(date.getFullYear(), 0, 1);
-  const days = Math.floor((date.getTime() - start.getTime()) / 86_400_000);
-  return `${date.getFullYear()}-${String(Math.ceil((days + start.getDay() + 1) / 7)).padStart(2, "0")}`;
-}
-
 function digestMessage(tasks: Task[]): string {
   const now = new Date();
   const weekFromNow = new Date(now);
@@ -86,13 +80,13 @@ export default function NotificationCenter() {
             delivery_key: `task-digest-daily:${localDateKey(now)}`,
           });
         }
-        if (preferences.weekly_task_digest !== false) {
+        if (preferences.weekly_task_digest !== false && now.getDay() === 1) {
           pending.push({
             user_id: user.id,
             title: "Weekly task reminder",
             message: digestMessage(tasks),
             related_url: "/tasks",
-            delivery_key: `task-digest-weekly:${weekKey(now)}`,
+            delivery_key: `task-digest-weekly:${localDateKey(now)}`,
           });
         }
       }

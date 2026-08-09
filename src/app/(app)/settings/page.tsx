@@ -3,19 +3,18 @@ export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import {
+  DEFAULT_NOTIFICATION_PREFERENCES,
+  normalizeNotificationPreferences,
+  type NotificationPreferences,
+} from "@/lib/notification-preferences";
 import Link from "next/link";
-import { User, Bell, Bot, Calendar, Upload, Shield, Save, Check, AlertCircle } from "lucide-react";
+import { User, Bell, Bot, Calendar, Upload, Shield, Save, Check, AlertCircle, Mail, Smartphone } from "lucide-react";
 
 type ProfilePreferences = {
   school_name?: string;
   department_name?: string;
   [key: string]: unknown;
-};
-
-type NotificationPreferences = {
-  in_app: boolean;
-  daily_task_digest: boolean;
-  weekly_task_digest: boolean;
 };
 
 export default function SettingsPage() {
@@ -27,11 +26,13 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profileLinks, setProfileLinks] = useState<{ school_id: string | null; department_id: string | null; preferences: ProfilePreferences }>({ school_id: null, department_id: null, preferences: {} });
-  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>({
-    in_app: true,
-    daily_task_digest: true,
-    weekly_task_digest: true,
-  });
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(DEFAULT_NOTIFICATION_PREFERENCES);
+  const [pushSupported, setPushSupported] = useState(false);
+  const [pushSubscribed, setPushSubscribed] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  const [emailConfigured, setEmailConfigured] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -65,17 +66,33 @@ export default function SettingsPage() {
         school: schoolName || preferences.school_name || "",
       });
       setProfileLinks({ school_id: p?.school_id ?? null, department_id: p?.department_id ?? null, preferences });
-      const savedNotificationPreferences = (savedSettings?.notification_preferences && typeof savedSettings.notification_preferences === "object"
-        ? savedSettings.notification_preferences
-        : {}) as Partial<NotificationPreferences>;
-      setNotificationPreferences({
-        in_app: savedNotificationPreferences.in_app !== false,
-        daily_task_digest: savedNotificationPreferences.daily_task_digest !== false,
-        weekly_task_digest: savedNotificationPreferences.weekly_task_digest !== false,
-      });
+      setNotificationPreferences(normalizeNotificationPreferences(savedSettings?.notification_preferences));
       setLoading(false);
     }
     load();
+    fetch("/api/notifications/capabilities")
+      .then((response) => response.ok ? response.json() : null)
+      .then((capabilities: { emailConfigured?: boolean } | null) => setEmailConfigured(Boolean(capabilities?.emailConfigured)))
+      .catch(() => setEmailConfigured(false));
+  }, []);
+
+  useEffect(() => {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const standalone = window.matchMedia("(display-mode: standalone)").matches
+      || (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    queueMicrotask(() => {
+      setIsIOS(ios);
+      setIsStandalone(standalone);
+    });
+
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" })
+      .then(async (registration) => {
+        setPushSupported(true);
+        const subscription = await registration.pushManager.getSubscription();
+        setPushSubscribed(Boolean(subscription));
+      })
+      .catch(() => setPushSupported(false));
   }, []);
 
   async function saveProfile() {
@@ -132,26 +149,31 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
-  async function saveNotificationPreferences() {
+  async function persistNotificationPreferences(preferences: NotificationPreferences) {
     const supabase = createClient();
-    setSavingNotifications(true);
-    setNotificationsSaved(false);
-    setError(null);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      setError("Your session has expired. Please sign in again.");
-      setSavingNotifications(false);
-      return;
+      throw new Error("Your session has expired. Please sign in again.");
     }
 
     const { error: saveError } = await supabase.from("settings").upsert({
       user_id: user.id,
-      notification_preferences: notificationPreferences,
+      notification_preferences: preferences,
       updated_at: new Date().toISOString(),
     }, { onConflict: "user_id" });
 
-    if (saveError) {
-      setError(saveError.message);
+    if (saveError) throw saveError;
+  }
+
+  async function saveNotificationPreferences() {
+    setSavingNotifications(true);
+    setNotificationsSaved(false);
+    setError(null);
+
+    try {
+      await persistNotificationPreferences(notificationPreferences);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save reminder settings.");
       setSavingNotifications(false);
       return;
     }
@@ -159,6 +181,81 @@ export default function SettingsPage() {
     setSavingNotifications(false);
     setNotificationsSaved(true);
     setTimeout(() => setNotificationsSaved(false), 2000);
+  }
+
+  function urlBase64ToUint8Array(value: string): Uint8Array<ArrayBuffer> {
+    const padding = "=".repeat((4 - (value.length % 4)) % 4);
+    const base64 = (value + padding).replace(/-/g, "+").replace(/_/g, "/");
+    const raw = window.atob(base64);
+    const bytes = new Uint8Array(new ArrayBuffer(raw.length));
+    for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
+    return bytes;
+  }
+
+  async function enablePhoneNotifications() {
+    setPushBusy(true);
+    setError(null);
+    try {
+      const keyResponse = await fetch("/api/push/subscriptions");
+      const keyPayload = await keyResponse.json() as { publicKey?: string; error?: string };
+      if (!keyResponse.ok || !keyPayload.publicKey) throw new Error(keyPayload.error || "Phone notifications are not available.");
+
+      const registration = await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing ?? await registration.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(keyPayload.publicKey),
+      });
+      const saveResponse = await fetch("/api/push/subscriptions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(subscription.toJSON()),
+      });
+      const savePayload = await saveResponse.json() as { error?: string };
+      if (!saveResponse.ok) throw new Error(savePayload.error || "Could not enable phone notifications.");
+
+      const next = { ...notificationPreferences, push: true };
+      await persistNotificationPreferences(next);
+      setNotificationPreferences(next);
+      setPushSubscribed(true);
+    } catch (pushError) {
+      if (pushError instanceof DOMException && pushError.name === "NotAllowedError") {
+        setError("Notification permission was declined. Allow notifications for this site in your phone settings, then try again.");
+      } else {
+        setError(pushError instanceof Error ? pushError.message : "Could not enable phone notifications.");
+      }
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
+  async function disablePhoneNotifications() {
+    setPushBusy(true);
+    setError(null);
+    try {
+      const registration = await navigator.serviceWorker.ready;
+      const subscription = await registration.pushManager.getSubscription();
+      if (subscription) {
+        const response = await fetch("/api/push/subscriptions", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: subscription.endpoint }),
+        });
+        if (!response.ok) {
+          const payload = await response.json() as { error?: string };
+          throw new Error(payload.error || "Could not disable phone notifications.");
+        }
+        await subscription.unsubscribe();
+      }
+      const next = { ...notificationPreferences, push: false };
+      await persistNotificationPreferences(next);
+      setNotificationPreferences(next);
+      setPushSubscribed(false);
+    } catch (pushError) {
+      setError(pushError instanceof Error ? pushError.message : "Could not disable phone notifications.");
+    } finally {
+      setPushBusy(false);
+    }
   }
 
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-32 mb-6" /><div className="space-y-4">{[1,2,3].map(i => <div key={i} className="skeleton h-16" />)}</div></div>;
@@ -188,7 +285,7 @@ export default function SettingsPage() {
       {/* Notifications */}
       <div className="card mb-6">
         <div className="flex-between mb-4 gap-4">
-          <div className="flex items-center gap-4"><Bell className="w-5 h-5 text-muted" /><div><h2 className="text-lg font-semibold">Task Reminders</h2><p className="text-xs text-muted">Choose how often the app summarises your outstanding tasks.</p></div></div>
+          <div className="flex items-center gap-4"><Bell className="w-5 h-5 text-muted" /><div><h2 className="text-lg font-semibold">Task Reminders</h2><p className="text-xs text-muted">Choose where and when deadline reminders are delivered.</p></div></div>
           <button onClick={saveNotificationPreferences} disabled={savingNotifications} className="btn btn-primary btn-sm shrink-0">
             {savingNotifications ? <><Save className="w-3.5 h-3.5 animate-spin" /> Saving...</> : notificationsSaved ? <><Check className="w-3.5 h-3.5" /> Saved</> : <><Save className="w-3.5 h-3.5" /> Save</>}
           </button>
@@ -201,17 +298,51 @@ export default function SettingsPage() {
             onChange={(checked) => setNotificationPreferences((current) => ({ ...current, in_app: checked }))}
           />
           <NotificationToggle
+            label="Email reminders"
+            description={emailConfigured ? `Send deadline reminders to ${profile.email}.` : "Email provider setup is awaiting a verified sending domain."}
+            checked={notificationPreferences.email}
+            icon={Mail}
+            disabled={!emailConfigured}
+            onChange={(checked) => setNotificationPreferences((current) => ({ ...current, email: checked }))}
+          />
+          <div className="rounded-md border border-border px-3 py-3">
+            <div className="flex-between gap-4">
+              <div className="flex min-w-0 items-start gap-3">
+                <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden />
+                <div>
+                  <p className="text-sm font-medium">Phone push notifications</p>
+                  <p className="mt-0.5 text-xs text-muted">
+                    {pushSubscribed ? "Enabled on this device. Deadline alerts can appear on your lock screen." : "Get a ping on this device when a deadline is approaching or overdue."}
+                  </p>
+                </div>
+              </div>
+              {pushSubscribed ? (
+                <button type="button" className="btn btn-secondary btn-sm shrink-0" disabled={pushBusy} onClick={disablePhoneNotifications}>{pushBusy ? "Working…" : "Disable"}</button>
+              ) : (
+                <button type="button" className="btn btn-primary btn-sm shrink-0" disabled={pushBusy || !pushSupported || (isIOS && !isStandalone)} onClick={enablePhoneNotifications}>{pushBusy ? "Enabling…" : "Enable"}</button>
+              )}
+            </div>
+            {isIOS && !isStandalone && (
+              <p className="mt-3 rounded-md bg-warning-bg px-3 py-2 text-xs text-warning">On iPhone, open this page in Safari, tap Share, choose <strong>Add to Home Screen</strong>, then open the installed app to enable notifications.</p>
+            )}
+            {!pushSupported && <p className="mt-2 text-xs text-muted">This browser does not support phone notifications.</p>}
+          </div>
+          <NotificationToggle
+            label="Deadline alerts"
+            description="Alert 7 days before, 1 day before, on the due date, and each day overdue."
+            checked={notificationPreferences.deadline_reminders}
+            onChange={(checked) => setNotificationPreferences((current) => ({ ...current, deadline_reminders: checked }))}
+          />
+          <NotificationToggle
             label="Daily outstanding-task reminder"
-            description="Create one summary each day when you use the app."
+            description="Create one outstanding-task summary each day."
             checked={notificationPreferences.daily_task_digest}
-            disabled={!notificationPreferences.in_app}
             onChange={(checked) => setNotificationPreferences((current) => ({ ...current, daily_task_digest: checked }))}
           />
           <NotificationToggle
             label="Weekly outstanding-task reminder"
-            description="Create one broader summary each week."
+            description="Send a broader outstanding-task overview every Monday."
             checked={notificationPreferences.weekly_task_digest}
-            disabled={!notificationPreferences.in_app}
             onChange={(checked) => setNotificationPreferences((current) => ({ ...current, weekly_task_digest: checked }))}
           />
         </div>
@@ -264,19 +395,24 @@ function NotificationToggle({
   description,
   checked,
   disabled = false,
+  icon: Icon,
   onChange,
 }: {
   label: string;
   description: string;
   checked: boolean;
   disabled?: boolean;
+  icon?: typeof Bell;
   onChange: (checked: boolean) => void;
 }) {
   return (
     <div className={`flex-between gap-4 rounded-md border border-border px-3 py-3 ${disabled ? "opacity-50" : ""}`}>
-      <div>
+      <div className={Icon ? "flex min-w-0 items-start gap-3" : ""}>
+        {Icon && <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted" aria-hidden />}
+        <div>
         <p className="text-sm font-medium">{label}</p>
         <p className="mt-0.5 text-xs text-muted">{description}</p>
+        </div>
       </div>
       <button
         type="button"
