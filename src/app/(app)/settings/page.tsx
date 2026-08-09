@@ -10,6 +10,7 @@ import {
 } from "@/lib/notification-preferences";
 import Link from "next/link";
 import { User, Bell, Bot, Calendar, Upload, Shield, Save, Check, AlertCircle, Mail, Smartphone, Send } from "lucide-react";
+import SignOutButton from "@/components/auth/SignOutButton";
 
 type ProfilePreferences = {
   school_name?: string;
@@ -345,6 +346,13 @@ export default function SettingsPage() {
           <div><label className="form-label">Email</label><input className="form-input" value={profile.email} disabled /></div>
           <div><label htmlFor="settings-department" className="form-label">Department</label><input id="settings-department" className="form-input" value={profile.department} onChange={e => setProfile(p => ({ ...p, department: e.target.value }))} placeholder="Enter your department" /></div>
           <div><label htmlFor="settings-school" className="form-label">School</label><input id="settings-school" className="form-input" value={profile.school} onChange={e => setProfile(p => ({ ...p, school: e.target.value }))} placeholder="Enter your school" /></div>
+        </div>
+        <div className="mt-5 flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-sm font-medium">Signed in as {profile.email}</p>
+            <p className="mt-0.5 text-xs text-muted">Log out when you are finished using this device.</p>
+          </div>
+          <SignOutButton className="btn btn-secondary w-full justify-center sm:w-auto" />
         </div>
       </div>
 

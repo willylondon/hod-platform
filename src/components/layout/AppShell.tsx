@@ -19,6 +19,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import NotificationCenter from "@/components/layout/NotificationCenter";
+import SignOutButton from "@/components/auth/SignOutButton";
 
 interface NavItem {
   href: string;
@@ -168,6 +169,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </span>
             </span>
           </Link>
+          <SignOutButton className="mt-1 flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-white/70 transition-colors hover:bg-white/5 hover:text-white disabled:cursor-not-allowed disabled:opacity-60" />
         </div>
       </aside>
 
