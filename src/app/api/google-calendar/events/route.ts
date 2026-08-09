@@ -20,7 +20,11 @@ type GoogleEvent = {
   id?: string;
   status?: string;
   summary?: string;
+  description?: string;
+  location?: string;
+  htmlLink?: string;
   start?: { date?: string; dateTime?: string };
+  end?: { date?: string; dateTime?: string };
 };
 
 function requestedRange(request: Request) {
@@ -103,7 +107,17 @@ export async function GET(request: Request) {
     const events = (payload.items ?? []).flatMap((event) => {
       const date = event.start?.date || event.start?.dateTime?.slice(0, 10);
       if (!event.id || !date || event.status === "cancelled") return [];
-      return [{ id: event.id, title: event.summary || "Busy", date }];
+      return [{
+        id: event.id,
+        title: event.summary || "Busy",
+        date,
+        start: event.start?.dateTime || event.start?.date || date,
+        end: event.end?.dateTime || event.end?.date || null,
+        allDay: Boolean(event.start?.date),
+        description: event.description || null,
+        location: event.location || null,
+        htmlLink: event.htmlLink || null,
+      }];
     });
     const syncedAt = new Date().toISOString();
     await admin.from("google_calendar_connections").update({
