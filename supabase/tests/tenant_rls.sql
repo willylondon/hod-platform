@@ -3,7 +3,7 @@ BEGIN;
 CREATE EXTENSION IF NOT EXISTS pgtap WITH SCHEMA extensions;
 SET search_path = public, extensions;
 
-SELECT plan(8);
+SELECT plan(9);
 
 INSERT INTO auth.users (id, email)
 VALUES
@@ -112,6 +112,12 @@ SELECT is(
   (SELECT COUNT(*) FROM leadership_quotes),
   0::bigint,
   'an authenticated account without an app profile cannot read supporting tables'
+);
+
+RESET ROLE;
+SELECT ok(
+  NOT has_function_privilege('anon', 'public.set_profile_organization(text,text)', 'EXECUTE'),
+  'anonymous users cannot execute the organization editor function'
 );
 
 SELECT * FROM finish();
