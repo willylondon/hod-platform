@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { TIMEZONE_OPTIONS } from "@/lib/notification-preferences";
 import { ChevronRight, ChevronLeft, Check, AlertCircle } from "lucide-react";
 
 const STEPS = ["Profile", "School", "Preferences"];
@@ -18,9 +19,14 @@ export default function OnboardingPage() {
     academic_year: "2026-2027", current_term: "Term 1",
     working_days: ["Monday","Tuesday","Wednesday","Thursday","Friday"],
     preferred_hours_start: "08:00", preferred_hours_end: "16:00",
-    notifications_in_app: true, notifications_email: true,
+    notifications_in_app: true, notifications_email: false, timezone: "America/Jamaica",
     priorities: "",
   });
+
+  useEffect(() => {
+    const detectedTimezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (detectedTimezone) queueMicrotask(() => setForm(current => ({ ...current, timezone: detectedTimezone })));
+  }, []);
 
   function update<K extends keyof typeof form>(field: K, value: (typeof form)[K]) {
     setForm((current) => ({ ...current, [field]: value }));
@@ -38,52 +44,14 @@ export default function OnboardingPage() {
       return;
     }
 
-    const { error: profileError } = await supabase.from("profiles").insert({
-      id: user.id,
-      email: user.email!,
-      full_name: form.full_name,
-      role: "head_of_department",
-      preferences: {
-        notifications: { in_app: form.notifications_in_app, email: form.notifications_email },
-        academic_year: form.academic_year,
-        current_term: form.current_term,
-        working_days: form.working_days,
-        preferred_hours_start: form.preferred_hours_start,
-        preferred_hours_end: form.preferred_hours_end,
-        priorities: form.priorities,
-      },
+    const response = await fetch("/api/onboarding", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(form),
     });
-    if (profileError) {
-      setError(`We couldn't save your profile: ${profileError.message}`);
-      setSaving(false);
-      return;
-    }
-
-    const { error: orgError } = await supabase.rpc("set_profile_organization", {
-      p_school_name: form.school_name,
-      p_department_name: form.department_name,
-    });
-    if (orgError) {
-      setError(`We couldn't set up your school: ${orgError.message}`);
-      setSaving(false);
-      return;
-    }
-
-    const { error: settingsError } = await supabase.from("settings").upsert({
-      user_id: user.id,
-      notification_preferences: {
-        email: form.notifications_email,
-        in_app: true,
-        push: false,
-        telegram: false,
-        deadline_reminders: true,
-        daily_task_digest: true,
-        weekly_task_digest: true,
-        timezone: "America/Jamaica",
-      },
-    });
-    if (settingsError) {
-      setError(`We couldn't save your settings: ${settingsError.message}`);
+    const payload = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) {
+      setError(payload.error || "We couldn't complete your setup. Please try again.");
       setSaving(false);
       return;
     }
@@ -138,6 +106,22 @@ export default function OnboardingPage() {
                   <div><label className="form-label">Day Starts</label><input type="time" className="form-input" value={form.preferred_hours_start} onChange={e => update("preferred_hours_start", e.target.value)} /></div>
                   <div><label className="form-label">Day Ends</label><input type="time" className="form-input" value={form.preferred_hours_end} onChange={e => update("preferred_hours_end", e.target.value)} /></div>
                 </div>
+                <div>
+                  <label htmlFor="onboarding-timezone" className="form-label">Timezone</label>
+                  <select id="onboarding-timezone" className="form-select" value={form.timezone} onChange={e => update("timezone", e.target.value)}>
+                    {!TIMEZONE_OPTIONS.some(option => option.value === form.timezone) && <option value={form.timezone}>{form.timezone.replaceAll("_", " ")}</option>}
+                    {TIMEZONE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+                  </select>
+                  <p className="mt-1 text-xs text-muted">Deadline reminders use this timezone.</p>
+                </div>
+                <label className="flex items-start gap-3 rounded-md border border-border p-3 text-sm">
+                  <input type="checkbox" className="mt-0.5" checked={form.notifications_in_app} onChange={e => update("notifications_in_app", e.target.checked)} />
+                  <span><span className="block font-medium">In-app task reminders</span><span className="text-xs text-muted">Show daily, weekly and deadline reminders in the notification bell.</span></span>
+                </label>
+                <label className="flex items-start gap-3 rounded-md border border-border p-3 text-sm">
+                  <input type="checkbox" className="mt-0.5" checked={form.notifications_email} onChange={e => update("notifications_email", e.target.checked)} />
+                  <span><span className="block font-medium">Email task reminders</span><span className="text-xs text-muted">Send reminders to the email address used to sign in. This is off until you choose it.</span></span>
+                </label>
                 <div><label className="form-label">Leadership Priorities (optional)</label><textarea className="form-input" rows={3} value={form.priorities} onChange={e => update("priorities", e.target.value)} placeholder="e.g. Improve GCSE results, develop NQTs, curriculum redesign" /></div>
               </div>
             </>

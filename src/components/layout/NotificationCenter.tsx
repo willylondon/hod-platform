@@ -5,37 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, Check, Clock, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { timeAgo } from "@/lib/utils";
-import type { Notification, Task } from "@/lib/types";
-
-type NotificationPreferences = {
-  in_app?: boolean;
-  daily_task_digest?: boolean;
-  weekly_task_digest?: boolean;
-};
-
-function localDateKey(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
-}
-
-function digestMessage(tasks: Task[]): string {
-  const now = new Date();
-  const weekFromNow = new Date(now);
-  weekFromNow.setDate(now.getDate() + 7);
-  const overdue = tasks.filter((task) => task.deadline && new Date(task.deadline) < now).length;
-  const dueSoon = tasks.filter((task) => {
-    if (!task.deadline) return false;
-    const deadline = new Date(task.deadline);
-    return deadline >= now && deadline <= weekFromNow;
-  }).length;
-  const details = [
-    overdue ? `${overdue} overdue` : null,
-    dueSoon ? `${dueSoon} due in the next 7 days` : null,
-  ].filter(Boolean);
-  return `You have ${tasks.length} outstanding task${tasks.length === 1 ? "" : "s"}${details.length ? ` — ${details.join(" and ")}` : ""}.`;
-}
+import type { Notification } from "@/lib/types";
 
 export default function NotificationCenter() {
   const [open, setOpen] = useState(false);
@@ -52,50 +22,6 @@ export default function NotificationCenter() {
       if (!user || !active) {
         if (active) setLoading(false);
         return;
-      }
-
-      const [{ data: settings }, { data: taskRows }] = await Promise.all([
-        supabase.from("settings").select("notification_preferences").eq("user_id", user.id).maybeSingle(),
-        supabase.from("tasks").select("*").eq("created_by", user.id).not("status", "in", '("completed","cancelled")'),
-      ]);
-
-      const preferences = (settings?.notification_preferences ?? {}) as NotificationPreferences;
-      const tasks = (taskRows as Task[] | null) ?? [];
-      const now = new Date();
-      const pending: Array<{
-        user_id: string;
-        title: string;
-        message: string;
-        related_url: string;
-        delivery_key: string;
-      }> = [];
-
-      if (preferences.in_app !== false && tasks.length > 0) {
-        if (preferences.daily_task_digest !== false) {
-          pending.push({
-            user_id: user.id,
-            title: "Daily task reminder",
-            message: digestMessage(tasks),
-            related_url: "/tasks",
-            delivery_key: `task-digest-daily:${localDateKey(now)}`,
-          });
-        }
-        if (preferences.weekly_task_digest !== false && now.getDay() === 1) {
-          pending.push({
-            user_id: user.id,
-            title: "Weekly task reminder",
-            message: digestMessage(tasks),
-            related_url: "/tasks",
-            delivery_key: `task-digest-weekly:${localDateKey(now)}`,
-          });
-        }
-      }
-
-      if (pending.length > 0) {
-        await supabase.from("notifications").upsert(pending, {
-          onConflict: "user_id,delivery_key",
-          ignoreDuplicates: true,
-        });
       }
 
       const { data } = await supabase

@@ -24,7 +24,38 @@ type ProfileRow = { id: string; email: string; full_name: string };
 type SettingsRow = { user_id: string; notification_preferences: unknown };
 type PushRow = { id: string; user_id: string; endpoint: string; p256dh: string; auth: string };
 type TelegramRow = { id: string; user_id: string; chat_id: string };
-type DeliveryRow = { user_id: string; channel: "email" | "push" | "telegram"; delivery_key: string };
+type DeliveryChannel = "email" | "push" | "telegram";
+
+async function claimDelivery(
+  admin: ReturnType<typeof createAdminSupabase>,
+  userId: string,
+  channel: DeliveryChannel,
+  deliveryKey: string
+): Promise<string | null> {
+  const { data, error } = await admin.from("notification_deliveries").insert({
+    user_id: userId,
+    channel,
+    delivery_key: deliveryKey,
+  }).select("id").single();
+  if (error?.code === "23505") return null;
+  if (error) throw error;
+  return data.id;
+}
+
+async function releaseDelivery(admin: ReturnType<typeof createAdminSupabase>, deliveryId: string) {
+  const { error } = await admin.from("notification_deliveries").delete().eq("id", deliveryId);
+  if (error) console.error("task reminder delivery release error", { deliveryId, error });
+}
+
+async function recordProviderId(
+  admin: ReturnType<typeof createAdminSupabase>,
+  deliveryId: string,
+  providerId: string | null
+) {
+  if (!providerId) return;
+  const { error } = await admin.from("notification_deliveries").update({ provider_id: providerId }).eq("id", deliveryId);
+  if (error) console.error("task reminder provider receipt update error", { deliveryId, error });
+}
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => ({
@@ -97,17 +128,15 @@ export async function GET(request: Request) {
     { data: tasks, error: taskError },
     { data: subscriptions, error: pushError },
     { data: telegramConnections, error: telegramError },
-    { data: deliveries, error: deliveryError },
   ] = await Promise.all([
     admin.from("profiles").select("id,email,full_name"),
     admin.from("settings").select("user_id,notification_preferences"),
     admin.from("tasks").select("*").not("status", "in", '("completed","cancelled")'),
     admin.from("push_subscriptions").select("id,user_id,endpoint,p256dh,auth"),
     admin.from("telegram_connections").select("id,user_id,chat_id").not("chat_id", "is", null),
-    admin.from("notification_deliveries").select("user_id,channel,delivery_key").gte("created_at", new Date(now.getTime() - 14 * 86_400_000).toISOString()),
   ]);
 
-  const dataError = profileError || settingsError || taskError || pushError || telegramError || deliveryError;
+  const dataError = profileError || settingsError || taskError || pushError || telegramError;
   if (dataError) {
     console.error("task reminder query error", dataError);
     return NextResponse.json({ error: "Could not load reminders" }, { status: 500 });
@@ -125,8 +154,6 @@ export async function GET(request: Request) {
   const telegramByUser = new Map(
     (telegramConnections as TelegramRow[] | null ?? []).map((connection) => [connection.user_id, connection])
   );
-  const delivered = new Set((deliveries as DeliveryRow[] | null ?? []).map((row) => `${row.user_id}:${row.channel}:${row.delivery_key}`));
-
   let inAppCount = 0;
   let emailCount = 0;
   let pushCount = 0;
@@ -157,7 +184,10 @@ export async function GET(request: Request) {
       }
       for (const reminder of reminders) {
         const copy = reminderCopy(reminder);
-        const deliveryKey = `task-deadline:${reminder.task.id}:${reminder.window}:${reminder.window === "overdue" ? dateKey : "once"}`;
+        const deadlineKey = reminder.task.deadline
+          ? localDateKey(new Date(reminder.task.deadline), preferences.timezone)
+          : dateKey;
+        const deliveryKey = `task-deadline:${reminder.task.id}:${deadlineKey}:${reminder.window}:${reminder.window === "overdue" ? dateKey : "once"}`;
         const { error } = await admin.from("notifications").upsert({
           user_id: profile.id,
           title: copy.title,
@@ -189,7 +219,14 @@ export async function GET(request: Request) {
     if (process.env.RESEND_API_KEY && preferences.email && (shouldSendWeekly || shouldSendDaily || shouldSendDeadlineEmail)) {
       const kind = shouldSendWeekly ? "weekly" : shouldSendDaily ? "daily" : "deadline";
       const deliveryKey = `task-email:${kind}:${dateKey}`;
-      if (!delivered.has(`${profile.id}:email:${deliveryKey}`)) {
+      let deliveryId: string | null = null;
+      try {
+        deliveryId = await claimDelivery(admin, profile.id, "email", deliveryKey);
+      } catch (error) {
+        failureCount += 1;
+        console.error("task reminder email claim error", { userId: profile.id, error });
+      }
+      if (deliveryId) {
         try {
           const providerId = await sendReminderEmail({
             to: profile.email,
@@ -197,11 +234,10 @@ export async function GET(request: Request) {
             html: emailHtml(profile, reminders, userTasks, preferences.timezone, kind),
             idempotencyKey: `${profile.id}-${deliveryKey}`,
           });
-          const { error } = await admin.from("notification_deliveries").insert({ user_id: profile.id, channel: "email", delivery_key: deliveryKey, provider_id: providerId });
-          if (error) throw error;
-          delivered.add(`${profile.id}:email:${deliveryKey}`);
+          await recordProviderId(admin, deliveryId, providerId);
           emailCount += 1;
         } catch (error) {
+          await releaseDelivery(admin, deliveryId);
           failureCount += 1;
           console.error("task reminder email error", { userId: profile.id, error });
         }
@@ -213,7 +249,14 @@ export async function GET(request: Request) {
         if (shouldSendDaily || shouldSendWeekly) {
           const kind = shouldSendWeekly ? "weekly" : "daily";
           const deliveryKey = `task-push:${subscription.id}:${kind}:${dateKey}`;
-          if (!delivered.has(`${profile.id}:push:${deliveryKey}`)) {
+          let deliveryId: string | null = null;
+          try {
+            deliveryId = await claimDelivery(admin, profile.id, "push", deliveryKey);
+          } catch (error) {
+            failureCount += 1;
+            console.error("task digest push claim error", { userId: profile.id, error });
+          }
+          if (deliveryId) {
             try {
               await sendReminderPush({
                 endpoint: subscription.endpoint,
@@ -223,11 +266,9 @@ export async function GET(request: Request) {
                 body: digestMessage,
                 url: "/tasks",
               });
-              const { error } = await admin.from("notification_deliveries").insert({ user_id: profile.id, channel: "push", delivery_key: deliveryKey });
-              if (error) throw error;
-              delivered.add(`${profile.id}:push:${deliveryKey}`);
               pushCount += 1;
             } catch (error) {
+              await releaseDelivery(admin, deliveryId);
               failureCount += 1;
               const status = pushStatusCode(error);
               if (status === 404 || status === 410) await admin.from("push_subscriptions").delete().eq("id", subscription.id);
@@ -237,15 +278,23 @@ export async function GET(request: Request) {
         }
         for (const reminder of reminders) {
           const copy = reminderCopy(reminder);
-          const deliveryKey = `task-push:${subscription.id}:${reminder.task.id}:${reminder.window}:${reminder.window === "overdue" ? dateKey : "once"}`;
-          if (delivered.has(`${profile.id}:push:${deliveryKey}`)) continue;
+          const deadlineKey = reminder.task.deadline
+            ? localDateKey(new Date(reminder.task.deadline), preferences.timezone)
+            : dateKey;
+          const deliveryKey = `task-push:${subscription.id}:${reminder.task.id}:${deadlineKey}:${reminder.window}:${reminder.window === "overdue" ? dateKey : "once"}`;
+          let deliveryId: string | null = null;
+          try {
+            deliveryId = await claimDelivery(admin, profile.id, "push", deliveryKey);
+          } catch (error) {
+            failureCount += 1;
+            console.error("task reminder push claim error", { userId: profile.id, error });
+          }
+          if (!deliveryId) continue;
           try {
             await sendReminderPush({ endpoint: subscription.endpoint, p256dh: subscription.p256dh, auth: subscription.auth, title: copy.title, body: copy.message, url: "/tasks" });
-            const { error } = await admin.from("notification_deliveries").insert({ user_id: profile.id, channel: "push", delivery_key: deliveryKey });
-            if (error) throw error;
-            delivered.add(`${profile.id}:push:${deliveryKey}`);
             pushCount += 1;
           } catch (error) {
+            await releaseDelivery(admin, deliveryId);
             failureCount += 1;
             const status = pushStatusCode(error);
             if (status === 404 || status === 410) {
@@ -261,22 +310,23 @@ export async function GET(request: Request) {
     if (process.env.TELEGRAM_BOT_TOKEN && preferences.telegram && telegramConnection && (reminders.length > 0 || shouldSendDaily || shouldSendWeekly)) {
       const kind = shouldSendWeekly ? "weekly" : shouldSendDaily ? "daily" : "deadline";
       const deliveryKey = `task-telegram:${telegramConnection.id}:${kind}:${dateKey}`;
-      if (!delivered.has(`${profile.id}:telegram:${deliveryKey}`)) {
+      let deliveryId: string | null = null;
+      try {
+        deliveryId = await claimDelivery(admin, profile.id, "telegram", deliveryKey);
+      } catch (error) {
+        failureCount += 1;
+        console.error("task reminder Telegram claim error", { userId: profile.id, error });
+      }
+      if (deliveryId) {
         try {
           const providerId = await sendReminderTelegram({
             chatId: telegramConnection.chat_id,
             text: telegramText(reminders, userTasks, preferences.timezone, kind),
           });
-          const { error } = await admin.from("notification_deliveries").insert({
-            user_id: profile.id,
-            channel: "telegram",
-            delivery_key: deliveryKey,
-            provider_id: providerId,
-          });
-          if (error) throw error;
-          delivered.add(`${profile.id}:telegram:${deliveryKey}`);
+          await recordProviderId(admin, deliveryId, providerId);
           telegramCount += 1;
         } catch (error) {
+          await releaseDelivery(admin, deliveryId);
           failureCount += 1;
           if (error instanceof TelegramDeliveryError && error.status === 403) {
             await admin.from("telegram_connections").delete().eq("id", telegramConnection.id);

@@ -10,7 +10,7 @@ export type NotificationPreferences = {
 };
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
-  email: true,
+  email: false,
   in_app: true,
   push: false,
   telegram: false,
@@ -19,6 +19,30 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   weekly_task_digest: true,
   timezone: "America/Jamaica",
 };
+
+export const TIMEZONE_OPTIONS = [
+  { value: "America/Jamaica", label: "Jamaica" },
+  { value: "America/New_York", label: "Eastern Time (US & Canada)" },
+  { value: "America/Chicago", label: "Central Time (US & Canada)" },
+  { value: "America/Denver", label: "Mountain Time (US & Canada)" },
+  { value: "America/Los_Angeles", label: "Pacific Time (US & Canada)" },
+  { value: "America/Toronto", label: "Toronto" },
+  { value: "America/Nassau", label: "The Bahamas" },
+  { value: "America/Barbados", label: "Barbados" },
+  { value: "America/Port_of_Spain", label: "Trinidad & Tobago" },
+  { value: "Europe/London", label: "United Kingdom" },
+  { value: "UTC", label: "UTC" },
+] as const;
+
+function normalizeTimezone(value: unknown): string {
+  if (typeof value !== "string" || !value) return DEFAULT_NOTIFICATION_PREFERENCES.timezone;
+  try {
+    new Intl.DateTimeFormat("en", { timeZone: value }).format();
+    return value;
+  } catch {
+    return DEFAULT_NOTIFICATION_PREFERENCES.timezone;
+  }
+}
 
 export function normalizeNotificationPreferences(value: unknown): NotificationPreferences {
   const saved = value && typeof value === "object"
@@ -33,6 +57,6 @@ export function normalizeNotificationPreferences(value: unknown): NotificationPr
     deadline_reminders: saved.deadline_reminders ?? DEFAULT_NOTIFICATION_PREFERENCES.deadline_reminders,
     daily_task_digest: saved.daily_task_digest ?? DEFAULT_NOTIFICATION_PREFERENCES.daily_task_digest,
     weekly_task_digest: saved.weekly_task_digest ?? DEFAULT_NOTIFICATION_PREFERENCES.weekly_task_digest,
-    timezone: saved.timezone || DEFAULT_NOTIFICATION_PREFERENCES.timezone,
+    timezone: normalizeTimezone(saved.timezone),
   };
 }

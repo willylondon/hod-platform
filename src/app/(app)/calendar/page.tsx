@@ -127,16 +127,18 @@ export default function CalendarPage() {
     else setLoading(true);
     setError(null);
     const supabase = createClient();
-    const timeMin = new Date(Date.UTC(year, month, 1)).toISOString();
-    const timeMax = new Date(Date.UTC(year, month + 1, 1)).toISOString();
+    const monthStart = dateKey(year, month, 1);
+    const nextMonthStart = dateKey(month === 11 ? year + 1 : year, (month + 1) % 12, 1);
+    const timeMin = new Date(year, month, 1).toISOString();
+    const timeMax = new Date(year, month + 1, 1).toISOString();
     const googleRequest = fetch(`/api/google-calendar/events?timeMin=${encodeURIComponent(timeMin)}&timeMax=${encodeURIComponent(timeMax)}`, {
       cache: "no-store",
     });
     const [customResult, meetingsResult, observationsResult, tasksResult, staffResult, googleResponse] = await Promise.all([
-      supabase.from("calendar_events").select("id, title, start_date"),
-      supabase.from("meetings").select("id, title, date"),
-      supabase.from("observations").select("id, scheduled_date, teacher_id"),
-      supabase.from("tasks").select("id, title, deadline").not("deadline", "is", null),
+      supabase.from("calendar_events").select("id, title, start_date").gte("start_date", monthStart).lt("start_date", nextMonthStart),
+      supabase.from("meetings").select("id, title, date, start_time, end_time, location, agenda, notes").gte("date", monthStart).lt("date", nextMonthStart),
+      supabase.from("observations").select("id, scheduled_date, scheduled_time, duration_minutes, teacher_id, observation_focus, raw_notes").gte("scheduled_date", monthStart).lt("scheduled_date", nextMonthStart),
+      supabase.from("tasks").select("id, title, deadline").gte("deadline", timeMin).lt("deadline", timeMax),
       supabase.from("staff").select("id, full_name"),
       googleRequest,
     ]);
@@ -150,10 +152,35 @@ export default function CalendarPage() {
 
     const combined: DisplayEvent[] = [
       ...(customResult.data ?? []).map(row => ({ id: `event-${row.id}`, title: row.title, date: row.start_date, start: row.start_date, allDay: true, source: "event" as const })),
-      ...(meetingsResult.data ?? []).map(row => ({ id: `meeting-${row.id}`, title: row.title, date: row.date, start: row.date, allDay: true, source: "meeting" as const })),
+      ...(meetingsResult.data ?? []).map(row => ({
+        id: `meeting-${row.id}`,
+        title: row.title,
+        date: row.date,
+        start: `${row.date}T${row.start_time}`,
+        end: `${row.date}T${row.end_time}`,
+        allDay: false,
+        source: "meeting" as const,
+        location: row.location,
+        description: row.notes || row.agenda,
+      })),
       ...(observationsResult.data ?? []).filter(row => row.scheduled_date).map(row => {
         const teacherName = staffById.get(row.teacher_id);
-        return { id: `observation-${row.id}`, title: `Observation${teacherName ? `: ${teacherName}` : ""}`, date: row.scheduled_date as string, start: row.scheduled_date as string, allDay: true, source: "observation" as const };
+        const observationDate = row.scheduled_date as string;
+        const start = row.scheduled_time ? `${observationDate}T${row.scheduled_time}` : observationDate;
+        const startDate = row.scheduled_time ? new Date(start) : null;
+        const end = startDate && row.duration_minutes
+          ? new Date(startDate.getTime() + row.duration_minutes * 60_000).toISOString()
+          : null;
+        return {
+          id: `observation-${row.id}`,
+          title: `Observation${teacherName ? `: ${teacherName}` : ""}`,
+          date: observationDate,
+          start,
+          end,
+          allDay: !row.scheduled_time,
+          source: "observation" as const,
+          description: row.raw_notes || row.observation_focus,
+        };
       }),
       ...(tasksResult.data ?? []).filter(row => row.deadline).map(row => ({ id: `task-${row.id}`, title: row.title, date: row.deadline!.slice(0, 10), start: row.deadline, allDay: false, source: "task" as const })),
       ...(googlePayload.events ?? []).map(event => ({ ...event, id: `google-${event.id}`, source: "google" as const })),
@@ -195,9 +222,9 @@ export default function CalendarPage() {
     return grouped;
   }, [events]);
 
-  const monthEvents = useMemo(() => events
+  const monthEvents = useMemo(() => [...events]
     .filter(event => event.date.startsWith(`${year}-${String(month + 1).padStart(2, "0")}`))
-    .toSorted((a, b) => (a.start || a.date).localeCompare(b.start || b.date)), [events, month, year]);
+    .sort((a, b) => (a.start || a.date).localeCompare(b.start || b.date)), [events, month, year]);
 
   const prevMonth = () => { if (month === 0) { setMonth(11); setYear(y => y - 1); } else setMonth(m => m - 1); };
   const nextMonth = () => { if (month === 11) { setMonth(0); setYear(y => y + 1); } else setMonth(m => m + 1); };

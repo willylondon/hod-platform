@@ -50,6 +50,9 @@ export function scheduledDeadlineReminders(
   return tasks.flatMap<ScheduledTaskReminder>((task) => {
     if (!task.deadline) return [];
     const days = daysUntilDeadline(task.deadline, now, timezone);
+    if (new Date(task.deadline).getTime() < now.getTime()) {
+      return [{ task, window: "overdue" as const, daysUntilDue: Math.min(days, 0) }];
+    }
     if (days === 7) return [{ task, window: "week" as const, daysUntilDue: days }];
     if (days === 1) return [{ task, window: "tomorrow" as const, daysUntilDue: days }];
     if (days === 0) return [{ task, window: "today" as const, daysUntilDue: days }];
@@ -70,7 +73,9 @@ export function reminderCopy(reminder: ScheduledTaskReminder) {
       const overdueDays = Math.abs(reminder.daysUntilDue);
       return {
         title: "Task overdue",
-        message: `“${reminder.task.title}” is ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.`,
+        message: overdueDays === 0
+          ? `“${reminder.task.title}” is overdue.`
+          : `“${reminder.task.title}” is ${overdueDays} day${overdueDays === 1 ? "" : "s"} overdue.`,
       };
     }
   }

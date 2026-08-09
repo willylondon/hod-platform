@@ -15,6 +15,23 @@ export default function SignOutButton({ className = "btn btn-secondary" }: { cla
     setError(null);
     try {
       const supabase = createClient();
+      if ("serviceWorker" in navigator && "PushManager" in window) {
+        try {
+          const registration = await navigator.serviceWorker.getRegistration("/");
+          const subscription = await registration?.pushManager.getSubscription();
+          if (subscription) {
+            await fetch("/api/push/subscriptions", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ endpoint: subscription.endpoint }),
+            }).catch(() => null);
+            await subscription.unsubscribe();
+          }
+        } catch (pushCleanupError) {
+          console.error("push subscription logout cleanup error", pushCleanupError);
+        }
+      }
+
       const { error: signOutError } = await supabase.auth.signOut({ scope: "local" });
       if (signOutError) throw signOutError;
 

@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   DEFAULT_NOTIFICATION_PREFERENCES,
   normalizeNotificationPreferences,
+  TIMEZONE_OPTIONS,
   type NotificationPreferences,
 } from "@/lib/notification-preferences";
 import Link from "next/link";
@@ -93,9 +94,9 @@ export default function SettingsPage() {
       if (!response.ok) return;
       const connection = await response.json() as TelegramConnection;
       setTelegramConnection(connection);
-      if (connection.connected) {
-        setNotificationPreferences((current) => current.telegram ? current : { ...current, telegram: true });
-      }
+      setNotificationPreferences((current) => current.telegram === connection.connected
+        ? current
+        : { ...current, telegram: connection.connected });
     }
 
     refreshTelegramConnection().catch(() => null);
@@ -147,13 +148,12 @@ export default function SettingsPage() {
       school_name: profile.school.trim(),
       department_name: profile.department.trim(),
     };
-    const { error: saveError } = await supabase.from("profiles").upsert({
-      id: user.id,
+    const { error: saveError } = await supabase.from("profiles").update({
       full_name: profile.full_name,
       role: profile.role,
-      email: user.email ?? profile.email,
       preferences,
-    });
+      updated_at: new Date().toISOString(),
+    }).eq("id", user.id);
 
     if (saveError) {
       setError(saveError.message);
@@ -441,6 +441,19 @@ export default function SettingsPage() {
             checked={notificationPreferences.weekly_task_digest}
             onChange={(checked) => setNotificationPreferences((current) => ({ ...current, weekly_task_digest: checked }))}
           />
+          <div className="rounded-md border border-border px-3 py-3">
+            <label htmlFor="reminder-timezone" className="text-sm font-medium">Reminder timezone</label>
+            <p className="mt-0.5 text-xs text-muted">Daily boundaries and deadline alerts use this timezone.</p>
+            <select
+              id="reminder-timezone"
+              className="form-select mt-3 w-full sm:max-w-sm"
+              value={notificationPreferences.timezone}
+              onChange={(event) => setNotificationPreferences((current) => ({ ...current, timezone: event.target.value }))}
+            >
+              {!TIMEZONE_OPTIONS.some(option => option.value === notificationPreferences.timezone) && <option value={notificationPreferences.timezone}>{notificationPreferences.timezone.replaceAll("_", " ")}</option>}
+              {TIMEZONE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+            </select>
+          </div>
         </div>
       </div>
 
