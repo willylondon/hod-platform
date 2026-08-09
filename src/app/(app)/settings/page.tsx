@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -11,13 +12,26 @@ type ProfilePreferences = {
   [key: string]: unknown;
 };
 
+type NotificationPreferences = {
+  in_app: boolean;
+  daily_task_digest: boolean;
+  weekly_task_digest: boolean;
+};
+
 export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
+  const [savingNotifications, setSavingNotifications] = useState(false);
+  const [notificationsSaved, setNotificationsSaved] = useState(false);
   const [saved, setSaved] = useState(false);
   const [profile, setProfile] = useState({ full_name: "", email: "", role: "", department: "", school: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [profileLinks, setProfileLinks] = useState<{ school_id: string | null; department_id: string | null; preferences: ProfilePreferences }>({ school_id: null, department_id: null, preferences: {} });
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>({
+    in_app: true,
+    daily_task_digest: true,
+    weekly_task_digest: true,
+  });
 
   useEffect(() => {
     async function load() {
@@ -25,7 +39,10 @@ export default function SettingsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoading(false); return; }
 
-      const { data: p, error: profileError } = await supabase.from("profiles").select("full_name, role, school_id, department_id, preferences").eq("id", user.id).maybeSingle();
+      const [{ data: p, error: profileError }, { data: savedSettings }] = await Promise.all([
+        supabase.from("profiles").select("full_name, role, school_id, department_id, preferences").eq("id", user.id).maybeSingle(),
+        supabase.from("settings").select("notification_preferences").eq("user_id", user.id).maybeSingle(),
+      ]);
       if (profileError) setError(profileError.message);
       let deptName = "";
       let schoolName = "";
@@ -48,6 +65,14 @@ export default function SettingsPage() {
         school: schoolName || preferences.school_name || "",
       });
       setProfileLinks({ school_id: p?.school_id ?? null, department_id: p?.department_id ?? null, preferences });
+      const savedNotificationPreferences = (savedSettings?.notification_preferences && typeof savedSettings.notification_preferences === "object"
+        ? savedSettings.notification_preferences
+        : {}) as Partial<NotificationPreferences>;
+      setNotificationPreferences({
+        in_app: savedNotificationPreferences.in_app !== false,
+        daily_task_digest: savedNotificationPreferences.daily_task_digest !== false,
+        weekly_task_digest: savedNotificationPreferences.weekly_task_digest !== false,
+      });
       setLoading(false);
     }
     load();
@@ -107,6 +132,35 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 2000);
   }
 
+  async function saveNotificationPreferences() {
+    const supabase = createClient();
+    setSavingNotifications(true);
+    setNotificationsSaved(false);
+    setError(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      setError("Your session has expired. Please sign in again.");
+      setSavingNotifications(false);
+      return;
+    }
+
+    const { error: saveError } = await supabase.from("settings").upsert({
+      user_id: user.id,
+      notification_preferences: notificationPreferences,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: "user_id" });
+
+    if (saveError) {
+      setError(saveError.message);
+      setSavingNotifications(false);
+      return;
+    }
+
+    setSavingNotifications(false);
+    setNotificationsSaved(true);
+    setTimeout(() => setNotificationsSaved(false), 2000);
+  }
+
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-32 mb-6" /><div className="space-y-4">{[1,2,3].map(i => <div key={i} className="skeleton h-16" />)}</div></div>;
 
   return (
@@ -133,11 +187,33 @@ export default function SettingsPage() {
 
       {/* Notifications */}
       <div className="card mb-6">
-        <div className="flex items-center gap-4 mb-4"><Bell className="w-5 h-5 text-muted" /><h2 className="text-lg font-semibold">Notifications</h2></div>
+        <div className="flex-between mb-4 gap-4">
+          <div className="flex items-center gap-4"><Bell className="w-5 h-5 text-muted" /><div><h2 className="text-lg font-semibold">Task Reminders</h2><p className="text-xs text-muted">Choose how often the app summarises your outstanding tasks.</p></div></div>
+          <button onClick={saveNotificationPreferences} disabled={savingNotifications} className="btn btn-primary btn-sm shrink-0">
+            {savingNotifications ? <><Save className="w-3.5 h-3.5 animate-spin" /> Saving...</> : notificationsSaved ? <><Check className="w-3.5 h-3.5" /> Saved</> : <><Save className="w-3.5 h-3.5" /> Save</>}
+          </button>
+        </div>
         <div className="space-y-3">
-          {["In-app notifications", "Email notifications", "Push notifications"].map((label, i) => (
-            <div key={i} className="flex-between py-2"><span className="text-sm">{label}</span><div className="w-10 h-6 rounded-full bg-border relative cursor-pointer"><div className={`w-5 h-5 rounded-full bg-surface absolute top-0.5 transition-all ${i === 0 ? "left-[18px] bg-primary" : "left-0.5"}`} /></div></div>
-          ))}
+          <NotificationToggle
+            label="In-app notifications"
+            description="Show reminders in the notification bell."
+            checked={notificationPreferences.in_app}
+            onChange={(checked) => setNotificationPreferences((current) => ({ ...current, in_app: checked }))}
+          />
+          <NotificationToggle
+            label="Daily outstanding-task reminder"
+            description="Create one summary each day when you use the app."
+            checked={notificationPreferences.daily_task_digest}
+            disabled={!notificationPreferences.in_app}
+            onChange={(checked) => setNotificationPreferences((current) => ({ ...current, daily_task_digest: checked }))}
+          />
+          <NotificationToggle
+            label="Weekly outstanding-task reminder"
+            description="Create one broader summary each week."
+            checked={notificationPreferences.weekly_task_digest}
+            disabled={!notificationPreferences.in_app}
+            onChange={(checked) => setNotificationPreferences((current) => ({ ...current, weekly_task_digest: checked }))}
+          />
         </div>
       </div>
 
@@ -179,6 +255,40 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function NotificationToggle({
+  label,
+  description,
+  checked,
+  disabled = false,
+  onChange,
+}: {
+  label: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div className={`flex-between gap-4 rounded-md border border-border px-3 py-3 ${disabled ? "opacity-50" : ""}`}>
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="mt-0.5 text-xs text-muted">{description}</p>
+      </div>
+      <button
+        type="button"
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
+        disabled={disabled}
+        onClick={() => onChange(!checked)}
+        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? "bg-primary" : "bg-border"}`}
+      >
+        <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-surface shadow-sm transition-all ${checked ? "left-[22px]" : "left-0.5"}`} />
+      </button>
     </div>
   );
 }

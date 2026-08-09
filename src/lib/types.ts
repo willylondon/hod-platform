@@ -91,6 +91,17 @@ export interface ChecklistItem {
   notes?: string;
 }
 
+export interface TaskAttachment {
+  id: string;
+  task_id: string;
+  uploaded_by: string;
+  file_name: string;
+  file_path: string;
+  file_size: number;
+  mime_type?: string;
+  created_at: string;
+}
+
 export interface WorkflowTemplate {
   id: string;
   title: string;
@@ -265,5 +276,6 @@ export interface Notification {
   message: string;
   is_read: boolean;
   related_url?: string;
+  delivery_key?: string;
   created_at: string;
 }

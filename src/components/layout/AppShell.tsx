@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
+import NotificationCenter from "@/components/layout/NotificationCenter";
 
 interface NavItem {
   href: string;
@@ -172,9 +173,16 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
       {/* ===== Main content ===== */}
       <div className="md:pl-60">
+        <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border bg-surface/95 px-4 backdrop-blur md:justify-end md:px-8">
+          <Link href="/dashboard" className="flex items-center gap-2 font-semibold text-primary md:hidden">
+            <GraduationCap className="h-5 w-5" aria-hidden />
+            HoD Platform
+          </Link>
+          <NotificationCenter />
+        </header>
         <main
           id="main-content"
-          className="min-h-screen p-4 pb-24 md:p-8 md:pb-8"
+          className="min-h-[calc(100vh-3.5rem)] p-4 pb-24 md:p-8 md:pb-8"
         >
           {children}
         </main>
