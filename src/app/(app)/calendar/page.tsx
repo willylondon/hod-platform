@@ -16,6 +16,7 @@ import {
   Loader2,
   MapPin,
   Pencil,
+  Users,
   Plus,
   RefreshCw,
   Unplug,
@@ -37,7 +38,30 @@ type DisplayEvent = {
   allDay?: boolean;
   description?: string | null;
   location?: string | null;
+  attendees?: string | null;
   htmlLink?: string | null;
+};
+type CalendarEventRow = {
+  id: string;
+  title: string;
+  start_date: string;
+  end_date?: string | null;
+  start_time?: string | null;
+  end_time?: string | null;
+  all_day: boolean;
+  description?: string | null;
+  location?: string | null;
+  attendees?: string | null;
+};
+type EventForm = {
+  title: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  allDay: boolean;
+  attendees: string;
+  location: string;
+  description: string;
 };
 type GoogleCalendarPayload = {
   configured: boolean;
@@ -102,6 +126,47 @@ function sourceHref(event: DisplayEvent) {
   return null;
 }
 
+function displayCustomEvent(row: CalendarEventRow): DisplayEvent {
+  const start = !row.all_day && row.start_time
+    ? `${row.start_date}T${row.start_time}`
+    : row.start_date;
+  const endDate = row.end_date || row.start_date;
+  const end = !row.all_day && row.end_time
+    ? `${endDate}T${row.end_time}`
+    : row.end_date || null;
+  return {
+    id: `event-${row.id}`,
+    title: row.title,
+    date: row.start_date,
+    start,
+    end,
+    allDay: row.all_day,
+    source: "event",
+    description: row.description,
+    location: row.location,
+    attendees: row.attendees,
+  };
+}
+
+function toEventForm(event: DisplayEvent): EventForm {
+  const startTime = event.start?.includes("T") ? event.start.slice(11, 16) : "09:00";
+  const endTime = event.end?.includes("T") ? event.end.slice(11, 16) : "10:00";
+  return {
+    title: event.title,
+    date: event.date,
+    startTime,
+    endTime,
+    allDay: event.allDay ?? false,
+    attendees: event.attendees || "",
+    location: event.location || "",
+    description: event.description || "",
+  };
+}
+
+function compactIcsDateTime(value: string): string {
+  return value.replace(/[-:]/g, "").slice(0, 15);
+}
+
 export default function CalendarPage() {
   const [today] = useState(() => new Date());
   const [year, setYear] = useState(today.getFullYear());
@@ -116,8 +181,18 @@ export default function CalendarPage() {
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
   const [editingEvent, setEditingEvent] = useState(false);
   const [savingEdit, setSavingEdit] = useState(false);
-  const [eventEdit, setEventEdit] = useState({ title: "", date: "" });
-  const [newEvent, setNewEvent] = useState({ title: "", date: dateKey(today.getFullYear(), today.getMonth(), today.getDate()) });
+  const emptyEventForm = (): EventForm => ({
+    title: "",
+    date: dateKey(today.getFullYear(), today.getMonth(), today.getDate()),
+    startTime: "09:00",
+    endTime: "10:00",
+    allDay: false,
+    attendees: "",
+    location: "",
+    description: "",
+  });
+  const [eventEdit, setEventEdit] = useState<EventForm>(emptyEventForm);
+  const [newEvent, setNewEvent] = useState<EventForm>(emptyEventForm);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [googleCalendar, setGoogleCalendar] = useState<GoogleCalendarPayload>({ configured: false, connected: false });
@@ -135,7 +210,7 @@ export default function CalendarPage() {
       cache: "no-store",
     });
     const [customResult, meetingsResult, observationsResult, tasksResult, staffResult, googleResponse] = await Promise.all([
-      supabase.from("calendar_events").select("id, title, start_date").gte("start_date", monthStart).lt("start_date", nextMonthStart),
+      supabase.from("calendar_events").select("id, title, start_date, end_date, start_time, end_time, all_day, description, location, attendees").gte("start_date", monthStart).lt("start_date", nextMonthStart),
       supabase.from("meetings").select("id, title, date, start_time, end_time, location, agenda, notes").gte("date", monthStart).lt("date", nextMonthStart),
       supabase.from("observations").select("id, scheduled_date, scheduled_time, duration_minutes, teacher_id, observation_focus, raw_notes").gte("scheduled_date", monthStart).lt("scheduled_date", nextMonthStart),
       supabase.from("tasks").select("id, title, deadline").gte("deadline", timeMin).lt("deadline", timeMax),
@@ -151,7 +226,7 @@ export default function CalendarPage() {
     const staffById = new Map((staffResult.data ?? []).map(member => [member.id, member.full_name]));
 
     const combined: DisplayEvent[] = [
-      ...(customResult.data ?? []).map(row => ({ id: `event-${row.id}`, title: row.title, date: row.start_date, start: row.start_date, allDay: true, source: "event" as const })),
+      ...(customResult.data ?? []).map(row => displayCustomEvent(row as CalendarEventRow)),
       ...(meetingsResult.data ?? []).map(row => ({
         id: `meeting-${row.id}`,
         title: row.title,
@@ -236,6 +311,11 @@ export default function CalendarPage() {
     setSaving(true);
     setError(null);
     setMessage(null);
+    if (!newEvent.allDay && newEvent.endTime && newEvent.endTime <= newEvent.startTime) {
+      setError("The appointment end time must be later than its start time.");
+      setSaving(false);
+      return;
+    }
     const supabase = createClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -246,17 +326,22 @@ export default function CalendarPage() {
     const { data, error: insertError } = await supabase.from("calendar_events").insert({
       title: newEvent.title.trim(),
       start_date: newEvent.date,
-      all_day: true,
+      start_time: newEvent.allDay ? null : newEvent.startTime,
+      end_time: newEvent.allDay ? null : newEvent.endTime || null,
+      all_day: newEvent.allDay,
+      attendees: newEvent.attendees.trim() || null,
+      location: newEvent.location.trim() || null,
+      description: newEvent.description.trim() || null,
       event_type: "custom",
       created_by: user.id,
-    }).select("id, title, start_date").single();
+    }).select("id, title, start_date, end_date, start_time, end_time, all_day, description, location, attendees").single();
     if (insertError || !data) {
       setError(insertError?.message ?? "The event could not be saved.");
       setSaving(false);
       return;
     }
-    setEvents(current => [...current, { id: `event-${data.id}`, title: data.title, date: data.start_date, source: "event" }]);
-    setNewEvent(current => ({ ...current, title: "" }));
+    setEvents(current => [...current, displayCustomEvent(data as CalendarEventRow)]);
+    setNewEvent(emptyEventForm());
     setShowForm(false);
     setSaving(false);
     setMessage("Event added to your HoD calendar.");
@@ -265,7 +350,21 @@ export default function CalendarPage() {
   function exportCalendar() {
     const body = events.filter(event => event.source !== "google").map(event => {
       const compactDate = event.date.replaceAll("-", "");
-      return ["BEGIN:VEVENT", `UID:${escapeIcs(event.id)}@hod-platform`, `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`, `DTSTART;VALUE=DATE:${compactDate}`, `SUMMARY:${escapeIcs(event.title)}`, "END:VEVENT"].join("\r\n");
+      const lines = [
+        "BEGIN:VEVENT",
+        `UID:${escapeIcs(event.id)}@hod-platform`,
+        `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "")}`,
+        event.allDay || !event.start?.includes("T")
+          ? `DTSTART;VALUE=DATE:${compactDate}`
+          : `DTSTART:${compactIcsDateTime(event.start)}`,
+      ];
+      if (event.end?.includes("T")) lines.push(`DTEND:${compactIcsDateTime(event.end)}`);
+      lines.push(`SUMMARY:${escapeIcs(event.title)}`);
+      if (event.location) lines.push(`LOCATION:${escapeIcs(event.location)}`);
+      const detail = [event.attendees ? `With: ${event.attendees}` : "", event.description || ""].filter(Boolean).join("\n");
+      if (detail) lines.push(`DESCRIPTION:${escapeIcs(detail)}`);
+      lines.push("END:VEVENT");
+      return lines.join("\r\n");
     }).join("\r\n");
     const ics = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//HoD Platform//Calendar//EN", "CALSCALE:GREGORIAN", body, "END:VCALENDAR"].join("\r\n");
     const url = URL.createObjectURL(new Blob([ics], { type: "text/calendar;charset=utf-8" }));
@@ -297,7 +396,7 @@ export default function CalendarPage() {
     setSelectedDay(null);
     setSelectedEvent(event);
     setEditingEvent(false);
-    setEventEdit({ title: event.title, date: event.date });
+    setEventEdit(toEventForm(event));
   }
 
   async function saveEventEdit(event: FormEvent<HTMLFormElement>) {
@@ -305,19 +404,33 @@ export default function CalendarPage() {
     if (!selectedEvent || selectedEvent.source !== "event" || !eventEdit.title.trim() || !eventEdit.date) return;
     setSavingEdit(true);
     setError(null);
+    if (!eventEdit.allDay && eventEdit.endTime && eventEdit.endTime <= eventEdit.startTime) {
+      setError("The appointment end time must be later than its start time.");
+      setSavingEdit(false);
+      return;
+    }
     const supabase = createClient();
     const { data, error: updateError } = await supabase
       .from("calendar_events")
-      .update({ title: eventEdit.title.trim(), start_date: eventEdit.date })
+      .update({
+        title: eventEdit.title.trim(),
+        start_date: eventEdit.date,
+        start_time: eventEdit.allDay ? null : eventEdit.startTime,
+        end_time: eventEdit.allDay ? null : eventEdit.endTime || null,
+        all_day: eventEdit.allDay,
+        attendees: eventEdit.attendees.trim() || null,
+        location: eventEdit.location.trim() || null,
+        description: eventEdit.description.trim() || null,
+      })
       .eq("id", selectedEvent.id.slice("event-".length))
-      .select("id, title, start_date")
+      .select("id, title, start_date, end_date, start_time, end_time, all_day, description, location, attendees")
       .single();
     if (updateError || !data) {
       setError(updateError?.message || "The event could not be updated.");
       setSavingEdit(false);
       return;
     }
-    const updated = { ...selectedEvent, title: data.title, date: data.start_date, start: data.start_date };
+    const updated = displayCustomEvent(data as CalendarEventRow);
     setEvents(current => current.map(item => item.id === selectedEvent.id ? updated : item));
     setSelectedEvent(updated);
     setEditingEvent(false);
@@ -363,11 +476,25 @@ export default function CalendarPage() {
       </div>
 
       {showForm && <form className="card mb-4" onSubmit={createEvent}>
-        <div className="mb-3 flex-between"><h2 className="text-base font-semibold">New HoD Event</h2><button type="button" className="btn btn-ghost btn-icon" onClick={() => setShowForm(false)} aria-label="Close new event form"><X className="w-4 h-4" /></button></div>
-        <div className="grid gap-3 sm:grid-cols-[1fr_180px_auto] sm:items-end">
-          <div><label htmlFor="calendar-event-title" className="form-label">Event title</label><input id="calendar-event-title" className="form-input" value={newEvent.title} onChange={event => setNewEvent(value => ({ ...value, title: event.target.value }))} required autoFocus /></div>
+        <div className="mb-5 flex-between gap-4">
+          <div><h2 className="text-lg font-semibold">New appointment or event</h2><p className="mt-0.5 text-xs text-muted">Add the practical details you will need when the day arrives.</p></div>
+          <button type="button" className="btn btn-ghost btn-icon" onClick={() => { setShowForm(false); setNewEvent(emptyEventForm()); }} aria-label="Close new event form"><X className="w-4 h-4" /></button>
+        </div>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2"><label htmlFor="calendar-event-title" className="form-label">Event title</label><input id="calendar-event-title" className="form-input" value={newEvent.title} onChange={event => setNewEvent(value => ({ ...value, title: event.target.value }))} placeholder="e.g. Curriculum review with Ms Brown" required autoFocus /></div>
           <div><label htmlFor="calendar-event-date" className="form-label">Date</label><input id="calendar-event-date" type="date" className="form-input" value={newEvent.date} onChange={event => setNewEvent(value => ({ ...value, date: event.target.value }))} required /></div>
-          <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : "Add event"}</button>
+          <label className="flex min-h-10 items-center gap-3 self-end rounded-md border border-border px-3 py-2 text-sm font-medium">
+            <input type="checkbox" checked={newEvent.allDay} onChange={event => setNewEvent(value => ({ ...value, allDay: event.target.checked }))} className="h-4 w-4 accent-primary" /> All-day event
+          </label>
+          <div><label htmlFor="calendar-event-start" className="form-label">Start time</label><input id="calendar-event-start" type="time" className="form-input" value={newEvent.startTime} onChange={event => setNewEvent(value => ({ ...value, startTime: event.target.value }))} disabled={newEvent.allDay} required={!newEvent.allDay} /></div>
+          <div><label htmlFor="calendar-event-end" className="form-label">End time</label><input id="calendar-event-end" type="time" className="form-input" value={newEvent.endTime} onChange={event => setNewEvent(value => ({ ...value, endTime: event.target.value }))} disabled={newEvent.allDay} /></div>
+          <div><label htmlFor="calendar-event-attendees" className="form-label">With whom <span className="font-normal text-muted">(optional)</span></label><input id="calendar-event-attendees" className="form-input" value={newEvent.attendees} onChange={event => setNewEvent(value => ({ ...value, attendees: event.target.value }))} placeholder="Person, team or organisation" /></div>
+          <div><label htmlFor="calendar-event-location" className="form-label">Where <span className="font-normal text-muted">(optional)</span></label><input id="calendar-event-location" className="form-input" value={newEvent.location} onChange={event => setNewEvent(value => ({ ...value, location: event.target.value }))} placeholder="Room, school or video link" /></div>
+          <div className="sm:col-span-2"><label htmlFor="calendar-event-description" className="form-label">Notes <span className="font-normal text-muted">(optional)</span></label><textarea id="calendar-event-description" className="form-input min-h-24 resize-y" value={newEvent.description} onChange={event => setNewEvent(value => ({ ...value, description: event.target.value }))} placeholder="Purpose, preparation, contact details or anything else to remember…" /></div>
+        </div>
+        <div className="mt-5 flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
+          <button type="button" className="btn btn-secondary" onClick={() => { setShowForm(false); setNewEvent(emptyEventForm()); }}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={saving || !newEvent.title.trim()}>{saving ? <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</> : <><Plus className="h-4 w-4" />Add to calendar</>}</button>
         </div>
       </form>}
 
@@ -444,14 +571,23 @@ export default function CalendarPage() {
 
           {editingEvent ? <form onSubmit={saveEventEdit} className="space-y-4">
             <div><label htmlFor="edit-event-title" className="form-label">Event title</label><input id="edit-event-title" className="form-input" value={eventEdit.title} onChange={event => setEventEdit(current => ({ ...current, title: event.target.value }))} required autoFocus /></div>
-            <div><label htmlFor="edit-event-date" className="form-label">Date</label><input id="edit-event-date" type="date" className="form-input" value={eventEdit.date} onChange={event => setEventEdit(current => ({ ...current, date: event.target.value }))} required /></div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div><label htmlFor="edit-event-date" className="form-label">Date</label><input id="edit-event-date" type="date" className="form-input" value={eventEdit.date} onChange={event => setEventEdit(current => ({ ...current, date: event.target.value }))} required /></div>
+              <label className="flex min-h-10 items-center gap-3 self-end rounded-md border border-border px-3 py-2 text-sm font-medium"><input type="checkbox" checked={eventEdit.allDay} onChange={event => setEventEdit(current => ({ ...current, allDay: event.target.checked }))} className="h-4 w-4 accent-primary" /> All-day event</label>
+              <div><label htmlFor="edit-event-start" className="form-label">Start time</label><input id="edit-event-start" type="time" className="form-input" value={eventEdit.startTime} onChange={event => setEventEdit(current => ({ ...current, startTime: event.target.value }))} disabled={eventEdit.allDay} required={!eventEdit.allDay} /></div>
+              <div><label htmlFor="edit-event-end" className="form-label">End time</label><input id="edit-event-end" type="time" className="form-input" value={eventEdit.endTime} onChange={event => setEventEdit(current => ({ ...current, endTime: event.target.value }))} disabled={eventEdit.allDay} /></div>
+              <div><label htmlFor="edit-event-attendees" className="form-label">With whom <span className="font-normal text-muted">(optional)</span></label><input id="edit-event-attendees" className="form-input" value={eventEdit.attendees} onChange={event => setEventEdit(current => ({ ...current, attendees: event.target.value }))} /></div>
+              <div><label htmlFor="edit-event-location" className="form-label">Where <span className="font-normal text-muted">(optional)</span></label><input id="edit-event-location" className="form-input" value={eventEdit.location} onChange={event => setEventEdit(current => ({ ...current, location: event.target.value }))} /></div>
+              <div className="sm:col-span-2"><label htmlFor="edit-event-description" className="form-label">Notes <span className="font-normal text-muted">(optional)</span></label><textarea id="edit-event-description" className="form-input min-h-24 resize-y" value={eventEdit.description} onChange={event => setEventEdit(current => ({ ...current, description: event.target.value }))} /></div>
+            </div>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end"><button type="button" className="btn btn-secondary" onClick={() => setEditingEvent(false)} disabled={savingEdit}>Cancel</button><button type="submit" className="btn btn-primary" disabled={savingEdit}>{savingEdit ? <><Loader2 className="h-4 w-4 animate-spin" />Saving…</> : "Save changes"}</button></div>
           </form> : <>
             <div className="space-y-4 rounded-lg bg-surface-alt p-4">
               <div className="flex items-start gap-3"><Clock className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden /><div><p className="text-xs font-medium uppercase tracking-wide text-muted">When</p><p className="mt-0.5 text-sm">{displayTiming(selectedEvent)}</p></div></div>
+              {selectedEvent.attendees && <div className="flex items-start gap-3"><Users className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden /><div><p className="text-xs font-medium uppercase tracking-wide text-muted">With whom</p><p className="mt-0.5 whitespace-pre-wrap text-sm">{selectedEvent.attendees}</p></div></div>}
               {selectedEvent.location && <div className="flex items-start gap-3"><MapPin className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden /><div><p className="text-xs font-medium uppercase tracking-wide text-muted">Location</p><p className="mt-0.5 whitespace-pre-wrap text-sm">{selectedEvent.location}</p></div></div>}
               {selectedEvent.description && <div className="flex items-start gap-3"><Info className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden /><div className="min-w-0"><p className="text-xs font-medium uppercase tracking-wide text-muted">Notes</p><p className="mt-0.5 whitespace-pre-wrap break-words text-sm">{selectedEvent.description}</p></div></div>}
-              {!selectedEvent.location && !selectedEvent.description && <div className="flex items-start gap-3"><CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden /><p className="text-sm text-muted">No location or notes were added to this event.</p></div>}
+              {!selectedEvent.attendees && !selectedEvent.location && !selectedEvent.description && <div className="flex items-start gap-3"><CalendarDays className="mt-0.5 h-5 w-5 shrink-0 text-muted" aria-hidden /><p className="text-sm text-muted">No people, location or notes were added to this event.</p></div>}
             </div>
             <div className="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
               {selectedEvent.source === "event" && <button type="button" className="btn btn-secondary" onClick={() => setEditingEvent(true)}><Pencil className="h-4 w-4" />Edit HoD event</button>}

@@ -220,6 +220,10 @@ export interface CalendarEvent {
   event_type: "task_deadline" | "observation" | "meeting" | "school_event" | "reporting_deadline" | "exam" | "custom";
   start_date: string;
   end_date?: string;
+  start_time?: string;
+  end_time?: string;
+  location?: string;
+  attendees?: string;
   all_day: boolean;
   related_task_id?: string;
   related_observation_id?: string;
