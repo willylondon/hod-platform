@@ -85,7 +85,7 @@ npm start
 ## AI Provider Setup
 
 ### OpenRouter (Recommended)
-Set `OPENROUTER_API_KEY` in your `.env.local` file (get one at [openrouter.ai](https://openrouter.ai)). The AI assistant will use `OPENROUTER_MODEL` (defaults to `google/gemini-3.5-flash-lite`) for:
+Set `OPENROUTER_API_KEY` in your `.env.local` file (get one at [openrouter.ai](https://openrouter.ai)). The AI assistant will use `OPENROUTER_MODEL` (defaults to [`google/gemini-3.5-flash-lite`](https://openrouter.ai/google/gemini-3.5-flash-lite), verified in OpenRouter's model catalogue on 2026-08-21) for:
 - Drafting emails
 - Creating meeting agendas
 - Summarizing meeting notes
