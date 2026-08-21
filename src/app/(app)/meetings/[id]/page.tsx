@@ -1,12 +1,12 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { formatDate } from "@/lib/utils";
-import { ArrowLeft, Clock, MapPin, Users, CheckCheck, Sparkles, Plus, AlertCircle } from "lucide-react";
+import type { Meeting, MeetingAction } from "@/lib/types";
+import { ArrowLeft, Clock, MapPin, CheckCheck, Sparkles, Plus, AlertCircle } from "lucide-react";
 
 const MEETING_TYPES = [
   { label: "Department Meeting", value: "department" },
@@ -23,8 +23,8 @@ export default function MeetingDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const isNew = id === "new";
-  const [meeting, setMeeting] = useState<any>(null);
-  const [actions, setActions] = useState<any[]>([]);
+  const [meeting, setMeeting] = useState<Meeting | null>(null);
+  const [actions, setActions] = useState<MeetingAction[]>([]);
   const [loading, setLoading] = useState(!isNew);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -38,21 +38,21 @@ export default function MeetingDetailPage() {
     location: "",
     agenda: "",
   });
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     async function load() {
       if (isNew) { setLoading(false); return; }
       const { data: m } = await supabase.from("meetings").select("*").eq("id", id).single();
       if (m) {
-        setMeeting(m);
+        setMeeting(m as Meeting);
         const { data: a } = await supabase.from("meeting_actions").select("*").eq("meeting_id", m.id);
-        setActions(a || []);
+        setActions((a as MeetingAction[]) || []);
       }
       setLoading(false);
     }
     load();
-  }, [id]);
+  }, [id, isNew, supabase]);
 
   async function saveMeeting(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -93,7 +93,7 @@ export default function MeetingDetailPage() {
     router.push(`/meetings/${data.id}`);
   }
 
-  async function convertToTask(action: any) {
+  async function convertToTask(action: MeetingAction) {
     setError(null);
     setConvertingId(action.id);
 

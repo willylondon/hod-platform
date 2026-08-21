@@ -218,7 +218,7 @@ async function seed() {
     { title: "Finalise exam invigilation rota", priority: "high", status: "waiting", deadline: new Date(now.getTime() + 1209600000), assigned_to: staff[0].id, category: "Exams" },
   ];
 
-  const { data: createdTasks } = await supabase.from("tasks").insert(
+  await supabase.from("tasks").insert(
     tasks.map(t => ({
       ...t,
       created_by: "00000000-0000-0000-0000-000000000000", // Will be replaced by real user
@@ -227,7 +227,7 @@ async function seed() {
   ).select();
 
   // 6. Create observations
-  const { data: obs } = await supabase.from("observations").insert([
+  await supabase.from("observations").insert([
     { teacher_id: staff[3].id, observer_id: "00000000-0000-0000-0000-000000000000", subject: "English Language", year_group: "Year 9", observation_type: "formal", observation_focus: "Questioning techniques and student engagement", scheduled_date: "2026-09-25", status: "feedback_pending", raw_notes: "Good use of cold calling. Wait time could be extended. Some students disengaged during independent work.", strengths: "Clear lesson objectives, good rapport with students, effective starter activity.", areas_for_development: "Extend wait time after questions, differentiate independent tasks, incorporate more peer assessment." },
     { teacher_id: staff[1].id, observer_id: "00000000-0000-0000-0000-000000000000", subject: "English Language", year_group: "Year 11", observation_type: "formal", observation_focus: "Exam preparation and revision strategies", scheduled_date: "2026-09-18", status: "coaching_pending", raw_notes: "Effective exam technique modelling. Good use of model answers. Students need more timed practice.", strengths: "Excellent subject knowledge, clear explanations, good use of past papers.", areas_for_development: "Build in more timed practice, vary revision activities, include peer marking exercises." },
     { teacher_id: staff[5].id, observer_id: "00000000-0000-0000-0000-000000000000", subject: "Drama & English", year_group: "Year 10", observation_type: "informal", observation_focus: "Group work and collaborative learning", scheduled_date: "2026-10-02", status: "scheduled" },

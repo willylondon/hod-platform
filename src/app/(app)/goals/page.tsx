@@ -1,27 +1,28 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { formatDate } from "@/lib/utils";
-import { Plus, TrendingUp, Target, X, AlertCircle } from "lucide-react";
+import type { DepartmentGoal } from "@/lib/types";
+import { Plus, Target, X, AlertCircle } from "lucide-react";
 
 export default function GoalsPage() {
-  const [goals, setGoals] = useState<any[]>([]);
+  const [goals, setGoals] = useState<DepartmentGoal[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newTargetDate, setNewTargetDate] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     supabase.from("department_goals").select("*").order("target_date").then(({ data }) => {
-      setGoals(data || []);
+      setGoals((data as DepartmentGoal[]) || []);
       setLoading(false);
     });
-  }, []);
+  }, [supabase]);
 
   async function createGoal(event?: React.FormEvent) {
     event?.preventDefault();
@@ -70,7 +71,7 @@ export default function GoalsPage() {
       return;
     }
 
-    setGoals(prev => [...prev, data].sort((a, b) => (a.target_date || "").localeCompare(b.target_date || "")));
+    setGoals(prev => [...prev, data as DepartmentGoal].sort((a, b) => (a.target_date || "").localeCompare(b.target_date || "")));
     setNewTitle("");
     setNewTargetDate("");
     setShowForm(false);

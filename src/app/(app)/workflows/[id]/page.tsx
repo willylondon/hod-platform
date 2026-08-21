@@ -1,37 +1,39 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { formatDate } from "@/lib/utils";
-import { ArrowLeft, CheckCircle2, Circle, Clock, Play } from "lucide-react";
+import type { WorkflowInstance, WorkflowStep } from "@/lib/types";
+import { ArrowLeft } from "lucide-react";
+
+type WorkflowStepWithCompletion = WorkflowStep & { completed?: boolean };
 
 export default function WorkflowDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const [instance, setInstance] = useState<any>(null);
-  const [steps, setSteps] = useState<any[]>([]);
+  const [instance, setInstance] = useState<WorkflowInstance | null>(null);
+  const [steps, setSteps] = useState<WorkflowStepWithCompletion[]>([]);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     async function load() {
       const { data: inst } = await supabase.from("workflow_instances").select("*").eq("id", id).single();
       if (inst) {
-        setInstance(inst);
+        setInstance(inst as WorkflowInstance);
         const { data: s } = await supabase.from("workflow_steps").select("*").eq("template_id", inst.template_id).order("sort_order");
-        setSteps(s || []);
+        setSteps((s as WorkflowStepWithCompletion[]) || []);
       }
       setLoading(false);
     }
     load();
-  }, [id]);
+  }, [id, supabase]);
 
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-48 mb-6" /><div className="space-y-3">{[1,2,3,4].map(i => <div key={i} className="skeleton h-12" />)}</div></div>;
   if (!instance) return <div className="p-6 text-center"><p className="text-muted">Workflow not found</p></div>;
 
-  const completed = steps.filter((s: any) => s.completed).length;
+  const completed = steps.filter((step) => step.completed).length;
   const pct = steps.length > 0 ? Math.round((completed / steps.length) * 100) : 0;
 
   return (
@@ -48,7 +50,7 @@ export default function WorkflowDetailPage() {
 
       {/* Steps */}
       <div className="space-y-2">
-        {steps.map((s: any, i: number) => (
+        {steps.map((s, i) => (
           <div key={s.id} className="card flex items-center gap-3 py-3">
             <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${s.completed ? "bg-success text-white" : "bg-border text-muted"}`}>{i + 1}</div>
             <span className="flex-1 text-sm">{s.title}</span>

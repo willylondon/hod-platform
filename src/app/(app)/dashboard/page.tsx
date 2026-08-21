@@ -1,12 +1,13 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { getGreeting, formatDate, daysUntil, countdownUrgency, timeAgo } from "@/lib/utils";
 import type { Task, Countdown, DepartmentGoal, Observation, Meeting, LeadershipQuote } from "@/lib/types";
-import { Calendar, Clock, Flag, AlertTriangle, CheckCircle2, Eye, MessageSquareQuote, TrendingUp, Sparkles } from "lucide-react";
+import { Calendar, Clock, Flag, AlertTriangle, CheckCircle2, Eye, MessageSquareQuote, TrendingUp } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
 export default function DashboardPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -17,7 +18,7 @@ export default function DashboardPage() {
   const [quote, setQuote] = useState<LeadershipQuote | null>(null);
   const [firstName, setFirstName] = useState("");
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     async function load() {
@@ -107,7 +108,7 @@ export default function DashboardPage() {
         <QuickStat icon={AlertTriangle} label="Overdue" value={overdueTasks.length} color="var(--color-error)" />
         <QuickStat icon={Flag} label="Due Today" value={todayTasks.length} color="var(--color-info)" />
         <QuickStat icon={Eye} label="Feedback Pending" value={feedbackPending.length} color="var(--color-warning)" />
-        <QuickStat icon={Calendar} label="Today's Meetings" value={todayMeetings.length} color="var(--color-primary)" />
+        <QuickStat icon={Calendar} label="Today’s Meetings" value={todayMeetings.length} color="var(--color-primary)" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -115,7 +116,7 @@ export default function DashboardPage() {
         <div className="lg:col-span-2 space-y-6">
           <div className="card">
             <div className="flex-between mb-4">
-              <h2 className="text-lg font-semibold">Today's Priorities</h2>
+              <h2 className="text-lg font-semibold">Today’s Priorities</h2>
               <Link href="/tasks" className="text-sm text-primary hover:underline">View all</Link>
             </div>
             {[...overdueTasks, ...todayTasks, ...upcomingTasks].slice(0, 8).length === 0 ? (
@@ -162,7 +163,7 @@ export default function DashboardPage() {
           {/* Today's meetings */}
           <div className="card">
             <div className="flex-between mb-4">
-              <h2 className="text-lg font-semibold">Today's Meetings</h2>
+              <h2 className="text-lg font-semibold">Today’s Meetings</h2>
               <Link href="/meetings" className="text-sm text-primary hover:underline">All</Link>
             </div>
             {todayMeetings.length === 0 ? (
@@ -219,7 +220,7 @@ export default function DashboardPage() {
   );
 }
 
-function QuickStat({ icon: Icon, label, value, color }: { icon: any; label: string; value: number; color: string }) {
+function QuickStat({ icon: Icon, label, value, color }: { icon: LucideIcon; label: string; value: number; color: string }) {
   return (
     <div className="card flex items-center gap-3">
       <Icon className="w-5 h-5 shrink-0" style={{ color }} />

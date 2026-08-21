@@ -1,21 +1,22 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Users, Mail, GraduationCap, Eye } from "lucide-react";
+import type { StaffMember } from "@/lib/types";
+import { Users, Mail } from "lucide-react";
 
 export default function StaffPage() {
-  const [staff, setStaff] = useState<any[]>([]);
+  const [staff, setStaff] = useState<StaffMember[]>([]);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     supabase.from("staff").select("*").order("full_name").then(({ data }) => {
-      setStaff(data || []);
+      setStaff((data as StaffMember[]) || []);
       setLoading(false);
     });
-  }, []);
+  }, [supabase]);
 
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-32 mb-6" /><div className="space-y-3">{[1,2,3,4,5,6].map(i => <div key={i} className="skeleton h-16" />)}</div></div>;
 

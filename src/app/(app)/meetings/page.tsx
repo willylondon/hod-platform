@@ -1,23 +1,23 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { formatDate } from "@/lib/utils";
-import { Plus, Calendar, Clock, MapPin, Users } from "lucide-react";
+import type { Meeting } from "@/lib/types";
+import { Plus, Clock, MapPin } from "lucide-react";
 
 export default function MeetingsPage() {
-  const [meetings, setMeetings] = useState<any[]>([]);
+  const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     supabase.from("meetings").select("*").order("date", { ascending: false }).then(({ data }) => {
-      setMeetings(data || []);
+      setMeetings((data as Meeting[]) || []);
       setLoading(false);
     });
-  }, []);
+  }, [supabase]);
 
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-32 mb-6" /><div className="space-y-3">{[1,2,3].map(i => <div key={i} className="skeleton h-20" />)}</div></div>;
 

@@ -1,17 +1,18 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { Plus, Play, Archive, Clock, CheckCircle2, AlertCircle } from "lucide-react";
+import type { WorkflowInstance, WorkflowTemplate } from "@/lib/types";
+import { Plus, Play, Archive, Clock, AlertCircle } from "lucide-react";
 
 export default function WorkflowsPage() {
-  const [templates, setTemplates] = useState<any[]>([]);
-  const [instances, setInstances] = useState<any[]>([]);
+  const [templates, setTemplates] = useState<WorkflowTemplate[]>([]);
+  const [instances, setInstances] = useState<WorkflowInstance[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
 
   useEffect(() => {
     async function load() {
@@ -19,12 +20,12 @@ export default function WorkflowsPage() {
         supabase.from("workflow_templates").select("*").eq("is_archived", false).order("created_at"),
         supabase.from("workflow_instances").select("*").order("created_at", { ascending: false }),
       ]);
-      setTemplates(t || []);
-      setInstances(i || []);
+      setTemplates((t as WorkflowTemplate[]) || []);
+      setInstances((i as WorkflowInstance[]) || []);
       setLoading(false);
     }
     load();
-  }, []);
+  }, [supabase]);
 
   async function startWorkflow(templateId: string) {
     setError(null);
@@ -45,7 +46,7 @@ export default function WorkflowsPage() {
       setError(`Couldn't start this workflow: ${insertError.message}`);
       return;
     }
-    if (data) setInstances(prev => [data, ...prev]);
+    if (data) setInstances(prev => [data as WorkflowInstance, ...prev]);
   }
 
   async function archiveTemplate(id: string) {
@@ -60,7 +61,7 @@ export default function WorkflowsPage() {
 
   if (loading) return <div className="p-6"><div className="skeleton h-8 w-32 mb-6" /><div className="grid grid-cols-1 md:grid-cols-2 gap-4">{[1,2,3,4].map(i => <div key={i} className="skeleton h-40" />)}</div></div>;
 
-  const activeInstances = instances.filter((i: any) => i.status !== "completed" && i.status !== "cancelled");
+  const activeInstances = instances.filter((instance) => instance.status !== "completed" && instance.status !== "cancelled");
 
   return (
     <div className="p-4 md:p-6 max-w-7xl mx-auto animate-fade-in">
@@ -80,7 +81,7 @@ export default function WorkflowsPage() {
         <div className="mb-8">
           <h2 className="text-lg font-semibold mb-4">Active Workflows</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {activeInstances.map((inst: any) => (
+            {activeInstances.map((inst) => (
               <Link key={inst.id} href={`/workflows/${inst.id}`} className="card card-hover">
                 <div className="flex-between mb-2">
                   <span className="badge badge-medium text-xs">{inst.status}</span>
@@ -97,7 +98,7 @@ export default function WorkflowsPage() {
       {/* Templates */}
       <h2 className="text-lg font-semibold mb-4">Workflow Templates</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {templates.map((t: any) => (
+        {templates.map((t) => (
           <div key={t.id} className="card">
             <div className="flex-between mb-2">
               <span className="badge badge-low text-xs">{t.category}</span>
