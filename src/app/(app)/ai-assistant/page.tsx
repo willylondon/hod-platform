@@ -52,6 +52,72 @@ interface GeneratedTask {
   deadline: string | null;
 }
 
+interface StreamResult {
+  text: string;
+  draft: AiDraft;
+  mock: boolean;
+}
+
+async function consumeAiStream(
+  response: Response,
+  onText: (text: string) => void
+): Promise<StreamResult> {
+  if (!response.body) throw new Error("AI response stream is unavailable");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let accumulatedText = "";
+  let result: StreamResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const events = buffer.split(/\r?\n\r?\n/);
+    buffer = events.pop() ?? "";
+
+    for (const event of events) {
+      const dataLine = event
+        .split(/\r?\n/)
+        .find((line) => line.startsWith("data:"));
+      if (!dataLine) continue;
+
+      let payload: Record<string, unknown>;
+      try {
+        payload = JSON.parse(dataLine.slice(5).trim()) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      if (payload.type === "token" && typeof payload.text === "string") {
+        accumulatedText += payload.text;
+        onText(accumulatedText);
+      } else if (payload.type === "error") {
+        throw new Error(
+          typeof payload.error === "string"
+            ? payload.error
+            : "AI response stream failed"
+        );
+      } else if (
+        payload.type === "done" &&
+        typeof payload.text === "string" &&
+        payload.draft
+      ) {
+        result = {
+          text: payload.text,
+          draft: payload.draft as AiDraft,
+          mock: Boolean(payload.mock),
+        };
+      }
+    }
+  }
+
+  if (!result) throw new Error("AI response ended before the draft was saved");
+  onText(result.text);
+  return result;
+}
+
 const ACTION_QUERY_PARAM_MAP: Record<string, string> = {
   feedback: "observation_feedback",
 };
@@ -141,7 +207,12 @@ function AiAssistantContent() {
     try {
       const res = await fetch("/api/ai", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(action === "notes_to_tasks"
+            ? {}
+            : { Accept: "text/event-stream" }),
+        },
         body: JSON.stringify({
           action,
           context: selectedContext ? contextLabel : "",
@@ -152,8 +223,24 @@ function AiAssistantContent() {
           styleReference: styleReference || undefined,
         }),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || "Generation failed");
+      }
+
+      if (res.headers.get("content-type")?.includes("text/event-stream")) {
+        const streamed = await consumeAiStream(res, setOutput);
+        setOutput(streamed.text);
+        setActiveDraftId(streamed.draft.id);
+        setHistory((current) => [
+          streamed.draft,
+          ...current.filter((existing) => existing.id !== streamed.draft.id),
+        ]);
+        setMockMode(streamed.mock);
+        return;
+      }
+
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Generation failed");
       setOutput(data.text);
       if (data.draft) {
         const draft = data.draft as AiDraft;
@@ -602,7 +689,7 @@ function AiAssistantContent() {
                     <button
                       className="btn btn-primary btn-sm"
                       onClick={handleApprove}
-                      disabled={approving}
+                      disabled={approving || loading}
                     >
                       {approving ? (
                         <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -619,6 +706,7 @@ function AiAssistantContent() {
                       <button
                         className="btn btn-secondary btn-sm"
                         onClick={() => { setEditText(output); setEditing(true); }}
+                        disabled={loading}
                       >
                         <PenLine className="h-4 w-4" aria-hidden /> Edit
                       </button>
@@ -626,7 +714,7 @@ function AiAssistantContent() {
                     <button
                       className="btn btn-ghost btn-sm"
                       onClick={handleDiscard}
-                      disabled={approving}
+                      disabled={approving || loading}
                     >
                       <Trash2 className="h-4 w-4" aria-hidden /> Discard
                     </button>

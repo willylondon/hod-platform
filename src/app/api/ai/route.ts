@@ -60,6 +60,18 @@ const TASK_DRAFT_SCHEMA = z
 const TASK_DRAFTS_SCHEMA = z
   .object({ tasks: z.array(TASK_DRAFT_SCHEMA).min(1).max(20) })
   .strict();
+const OPENROUTER_STREAM_CHUNK_SCHEMA = z
+  .object({
+    error: z.object({ code: z.union([z.string(), z.number()]).optional() }).optional(),
+    choices: z
+      .array(
+        z.object({
+          delta: z.object({ content: z.string().optional() }).passthrough(),
+        }).passthrough()
+      )
+      .optional(),
+  })
+  .passthrough();
 
 type ContextType = (typeof CONTEXT_TYPES)[number];
 type ContextRef = z.infer<typeof CONTEXT_REF_SCHEMA>;
@@ -175,6 +187,118 @@ async function persistAiDraft(
     return null;
   }
   return data;
+}
+
+function streamAiResponse(
+  upstream: ReadableStream<Uint8Array>,
+  supabase: ServerSupabase,
+  userId: string,
+  draftInput: Omit<PersistDraftInput, "outputText">
+): Response {
+  const encoder = new TextEncoder();
+  let upstreamReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let cancelled = false;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      upstreamReader = upstream.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+      let providerDone = false;
+
+      const emit = (payload: unknown) => {
+        if (cancelled) return;
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
+        );
+      };
+
+      try {
+        while (!providerDone) {
+          const { done, value } = await upstreamReader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split(/\r?\n/);
+          buffer = lines.pop() ?? "";
+
+          for (const line of lines) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (!payload) continue;
+            if (payload === "[DONE]") {
+              providerDone = true;
+              break;
+            }
+
+            let decoded: unknown;
+            try {
+              decoded = JSON.parse(payload);
+            } catch {
+              continue;
+            }
+            const parsedChunk = OPENROUTER_STREAM_CHUNK_SCHEMA.safeParse(decoded);
+            if (!parsedChunk.success) continue;
+            if (parsedChunk.data.error) {
+              console.error("OpenRouter stream error", {
+                code: parsedChunk.data.error.code,
+              });
+              throw new Error("provider_stream_error");
+            }
+            const text = parsedChunk.data.choices?.[0]?.delta.content;
+            if (text) {
+              fullText += text;
+              emit({ type: "token", text });
+            }
+          }
+        }
+
+        if (cancelled) return;
+        const finalText = fullText.trim();
+        if (!finalText) {
+          throw new Error("empty_stream");
+        }
+        const draft = await persistAiDraft(supabase, userId, {
+          ...draftInput,
+          outputText: finalText,
+        });
+        if (!draft) {
+          throw new Error("draft_persistence_error");
+        }
+        emit({ type: "done", text: finalText, draft, mock: false });
+      } catch (error) {
+        if (!cancelled) {
+          console.error("AI response stream failed", {
+            reason: error instanceof Error ? error.message : "unknown",
+          });
+          emit({
+            type: "error",
+            error:
+              error instanceof DOMException && error.name === "TimeoutError"
+                ? "AI provider timed out. Please try again."
+                : "AI provider interrupted the response. Please try again.",
+          });
+        }
+      } finally {
+        upstreamReader.releaseLock();
+        if (!cancelled) controller.close();
+      }
+    },
+    async cancel(reason) {
+      cancelled = true;
+      await upstreamReader?.cancel(reason).catch(() => undefined);
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
 }
 
 function formatWorkspaceRecord(
@@ -642,6 +766,9 @@ export async function POST(request: Request) {
     : "";
 
   const apiKey = process.env.OPENROUTER_API_KEY;
+  const wantsStream =
+    request.headers.get("accept")?.includes("text/event-stream") === true &&
+    action !== "notes_to_tasks";
 
   if (!apiKey) {
     // Simulate a small delay so the UI feels realistic
@@ -721,6 +848,7 @@ export async function POST(request: Request) {
         ],
         temperature: 0.7,
         max_tokens: 1500,
+        ...(wantsStream ? { stream: true } : {}),
         ...(action === "notes_to_tasks"
           ? {
               response_format: {
@@ -769,7 +897,7 @@ export async function POST(request: Request) {
           : {}),
       }),
       cache: "no-store",
-      signal: AbortSignal.timeout(30_000),
+      signal: AbortSignal.any([request.signal, AbortSignal.timeout(30_000)]),
     });
 
     if (!res.ok) {
@@ -781,6 +909,20 @@ export async function POST(request: Request) {
         { error: `OpenRouter request failed (${res.status})` },
         { status: 502 }
       );
+    }
+
+    if (wantsStream) {
+      if (!res.body) {
+        return NextResponse.json(
+          { error: "AI provider returned an invalid response" },
+          { status: 502 }
+        );
+      }
+      return streamAiResponse(res.body, supabase, auth.user.id, {
+        action,
+        contextRef,
+        inputPrompt: prompt,
+      });
     }
 
     const data: unknown = await res.json();
