@@ -72,6 +72,7 @@ function AiAssistantContent() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [output, setOutput] = useState<string | null>(null);
+  const [activeDraftId, setActiveDraftId] = useState<string | null>(null);
   const [generatedTasks, setGeneratedTasks] = useState<GeneratedTask[]>([]);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -104,6 +105,24 @@ function AiAssistantContent() {
       .finally(() => setContextsLoading(false));
   }, [requestedContextId, requestedContextType]);
 
+  useEffect(() => {
+    fetch("/api/ai/drafts")
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Draft history could not be loaded");
+        }
+        setHistory(Array.isArray(data.drafts) ? (data.drafts as AiDraft[]) : []);
+      })
+      .catch((historyError) => {
+        setError(
+          historyError instanceof Error
+            ? historyError.message
+            : "Draft history could not be loaded"
+        );
+      });
+  }, []);
+
   const action = selectedActionId ?? requestedAction ?? ACTIONS[0].id;
   const selectedAction = ACTIONS.find((a) => a.id === action)!;
   const selectedContext = contextOptions.find(
@@ -116,6 +135,7 @@ function AiAssistantContent() {
     setError(null);
     setNotice(null);
     setOutput(null);
+    setActiveDraftId(null);
     setGeneratedTasks([]);
     setEditing(false);
     try {
@@ -135,6 +155,14 @@ function AiAssistantContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setOutput(data.text);
+      if (data.draft) {
+        const draft = data.draft as AiDraft;
+        setActiveDraftId(draft.id);
+        setHistory((current) => [
+          draft,
+          ...current.filter((existing) => existing.id !== draft.id),
+        ]);
+      }
       setGeneratedTasks(
         Array.isArray(data.tasks) ? (data.tasks as GeneratedTask[]) : []
       );
@@ -192,20 +220,23 @@ function AiAssistantContent() {
     }
   }
 
-  function pushToHistory(text: string, approved: boolean, discarded: boolean) {
-    const draft: AiDraft = {
-      id: crypto.randomUUID(),
-      user_id: "local",
-      action: selectedAction.label,
-      context_type: selectedContext?.type,
-      context_id: selectedContext?.id,
-      input_prompt: prompt || undefined,
-      output_text: text,
-      is_approved: approved,
-      is_discarded: discarded,
-      created_at: new Date().toISOString(),
-    };
-    setHistory((h) => [draft, ...h]);
+  async function updateDraft(
+    status: "approved" | "discarded",
+    outputText?: string
+  ): Promise<AiDraft> {
+    if (!activeDraftId) {
+      throw new Error("This draft was not saved. Generate it again before continuing.");
+    }
+    const response = await fetch(`/api/ai/drafts/${activeDraftId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, outputText }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.draft) {
+      throw new Error(data.error || "Draft status could not be saved");
+    }
+    return data.draft as AiDraft;
   }
 
   async function handleApprove() {
@@ -245,8 +276,14 @@ function AiAssistantContent() {
         );
       }
 
-      pushToHistory(output, true, false);
+      const approvedDraft = await updateDraft("approved", output);
+      setHistory((current) =>
+        current.map((draft) =>
+          draft.id === approvedDraft.id ? approvedDraft : draft
+        )
+      );
       setOutput(null);
+      setActiveDraftId(null);
       setGeneratedTasks([]);
       setPrompt("");
       setNotesTruncated(false);
@@ -261,10 +298,29 @@ function AiAssistantContent() {
     }
   }
 
-  function handleDiscard() {
+  async function handleDiscard() {
     if (!output) return;
-    pushToHistory(output, false, true);
-    setOutput(null);
+    setApproving(true);
+    setError(null);
+    try {
+      const discardedDraft = await updateDraft("discarded", output);
+      setHistory((current) =>
+        current.map((draft) =>
+          draft.id === discardedDraft.id ? discardedDraft : draft
+        )
+      );
+      setOutput(null);
+      setActiveDraftId(null);
+      setGeneratedTasks([]);
+    } catch (discardError) {
+      setError(
+        discardError instanceof Error
+          ? discardError.message
+          : "The draft could not be discarded"
+      );
+    } finally {
+      setApproving(false);
+    }
   }
 
   function handleSaveEdit() {
@@ -567,7 +623,11 @@ function AiAssistantContent() {
                         <PenLine className="h-4 w-4" aria-hidden /> Edit
                       </button>
                     )}
-                    <button className="btn btn-ghost btn-sm" onClick={handleDiscard}>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={handleDiscard}
+                      disabled={approving}
+                    >
                       <Trash2 className="h-4 w-4" aria-hidden /> Discard
                     </button>
                   </div>
@@ -588,7 +648,7 @@ function AiAssistantContent() {
                     style={{ borderColor: "var(--color-border)" }}
                   >
                     <summary className="flex cursor-pointer items-center justify-between gap-2 text-sm font-medium">
-                      <span>{d.action}</span>
+                      <span>{ACTIONS.find((actionOption) => actionOption.id === d.action)?.label ?? d.action}</span>
                       <span className="flex items-center gap-2">
                         {d.is_approved && <span className="badge badge-success">Approved</span>}
                         <span className="text-muted text-xs">{formatDateTime(d.created_at)}</span>

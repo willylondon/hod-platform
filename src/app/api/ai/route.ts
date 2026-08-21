@@ -78,6 +78,13 @@ interface ContextOption {
 
 type TaskDraft = z.infer<typeof TASK_DRAFT_SCHEMA>;
 
+interface PersistDraftInput {
+  action: string;
+  contextRef?: ContextRef;
+  inputPrompt: string;
+  outputText: string;
+}
+
 function labelFor(action: string): string {
   return ACTION_LABELS[action] ?? action.replace(/_/g, " ");
 }
@@ -141,6 +148,33 @@ function parseTaskDrafts(rawText: string): TaskDraft[] | null {
   }
 
   return null;
+}
+
+async function persistAiDraft(
+  supabase: ServerSupabase,
+  userId: string,
+  input: PersistDraftInput
+) {
+  const { data, error } = await supabase
+    .from("ai_drafts")
+    .insert({
+      user_id: userId,
+      action: input.action,
+      context_type: input.contextRef?.type ?? null,
+      context_id: input.contextRef?.id ?? null,
+      input_prompt: input.inputPrompt || null,
+      output_text: input.outputText,
+    })
+    .select(
+      "id,user_id,action,context_type,context_id,input_prompt,output_text,is_approved,is_discarded,created_at"
+    )
+    .single();
+
+  if (error || !data) {
+    console.error("AI draft persistence failed", { code: error?.code });
+    return null;
+  }
+  return data;
 }
 
 function formatWorkspaceRecord(
@@ -615,9 +649,23 @@ export async function POST(request: Request) {
     const mockContext = [workspaceContext, context].filter(Boolean).join("\n\n");
     if (action === "notes_to_tasks") {
       const tasks = mockTaskDrafts(prompt || workspaceContext || context);
+      const text = formatTaskDrafts(tasks);
+      const draft = await persistAiDraft(supabase, auth.user.id, {
+        action,
+        contextRef,
+        inputPrompt: prompt,
+        outputText: text,
+      });
+      if (!draft) {
+        return NextResponse.json(
+          { error: "Draft could not be saved" },
+          { status: 500 }
+        );
+      }
       return NextResponse.json({
-        text: formatTaskDrafts(tasks),
+        text,
         tasks,
+        draft,
         mock: true,
       });
     }
@@ -625,7 +673,19 @@ export async function POST(request: Request) {
     const text = styleReference
       ? `${baseText}\n\n(Style reference considered: matched tone/format from your uploaded sample.)`
       : baseText;
-    return NextResponse.json({ text, mock: true });
+    const draft = await persistAiDraft(supabase, auth.user.id, {
+      action,
+      contextRef,
+      inputPrompt: prompt,
+      outputText: text,
+    });
+    if (!draft) {
+      return NextResponse.json(
+        { error: "Draft could not be saved" },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ text, draft, mock: true });
   }
 
   try {
@@ -750,14 +810,40 @@ export async function POST(request: Request) {
           { status: 502 }
         );
       }
+      const formattedText = formatTaskDrafts(tasks);
+      const draft = await persistAiDraft(supabase, auth.user.id, {
+        action,
+        contextRef,
+        inputPrompt: prompt,
+        outputText: formattedText,
+      });
+      if (!draft) {
+        return NextResponse.json(
+          { error: "Draft could not be saved" },
+          { status: 500 }
+        );
+      }
       return NextResponse.json({
-        text: formatTaskDrafts(tasks),
+        text: formattedText,
         tasks,
+        draft,
         mock: false,
       });
     }
 
-    return NextResponse.json({ text, mock: false });
+    const draft = await persistAiDraft(supabase, auth.user.id, {
+      action,
+      contextRef,
+      inputPrompt: prompt,
+      outputText: text,
+    });
+    if (!draft) {
+      return NextResponse.json(
+        { error: "Draft could not be saved" },
+        { status: 500 }
+      );
+    }
+    return NextResponse.json({ text, draft, mock: false });
   } catch (err) {
     console.error("AI route error:", err);
     if (err instanceof DOMException && err.name === "TimeoutError") {
