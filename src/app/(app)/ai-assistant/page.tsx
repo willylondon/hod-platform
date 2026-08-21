@@ -62,6 +62,7 @@ function AiAssistantContent() {
   const [contextsLoading, setContextsLoading] = useState(true);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [output, setOutput] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
@@ -194,12 +195,39 @@ function AiAssistantContent() {
     setHistory((h) => [draft, ...h]);
   }
 
-  function handleApprove() {
+  async function handleApprove() {
     if (!output) return;
-    pushToHistory(output, true, false);
-    setOutput(null);
-    setPrompt("");
-    setNotesTruncated(false);
+    setApproving(true);
+    setError(null);
+    try {
+      if (action === "observation_feedback" && selectedContext?.type === "observation") {
+        const response = await fetch(
+          `/api/observations/${selectedContext.id}/feedback`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback: output }),
+          }
+        );
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Feedback could not be saved");
+        }
+      }
+
+      pushToHistory(output, true, false);
+      setOutput(null);
+      setPrompt("");
+      setNotesTruncated(false);
+    } catch (approveError) {
+      setError(
+        approveError instanceof Error
+          ? approveError.message
+          : "The draft could not be approved"
+      );
+    } finally {
+      setApproving(false);
+    }
   }
 
   function handleDiscard() {
@@ -470,8 +498,17 @@ function AiAssistantContent() {
                     {output}
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <button className="btn btn-primary btn-sm" onClick={handleApprove}>
-                      <CheckCircle2 className="h-4 w-4" aria-hidden /> Approve
+                    <button
+                      className="btn btn-primary btn-sm"
+                      onClick={handleApprove}
+                      disabled={approving}
+                    >
+                      {approving ? (
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                      ) : (
+                        <CheckCircle2 className="h-4 w-4" aria-hidden />
+                      )}
+                      {approving ? "Saving…" : "Approve"}
                     </button>
                     <button
                       className="btn btn-secondary btn-sm"
