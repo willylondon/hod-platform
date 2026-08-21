@@ -46,6 +46,12 @@ interface ContextOption {
   label: string;
 }
 
+interface GeneratedTask {
+  title: string;
+  priority: "low" | "medium" | "high" | "urgent";
+  deadline: string | null;
+}
+
 const ACTION_QUERY_PARAM_MAP: Record<string, string> = {
   feedback: "observation_feedback",
 };
@@ -64,7 +70,9 @@ function AiAssistantContent() {
   const [loading, setLoading] = useState(false);
   const [approving, setApproving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [output, setOutput] = useState<string | null>(null);
+  const [generatedTasks, setGeneratedTasks] = useState<GeneratedTask[]>([]);
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
   const [history, setHistory] = useState<AiDraft[]>([]);
@@ -106,7 +114,9 @@ function AiAssistantContent() {
   async function generate() {
     setLoading(true);
     setError(null);
+    setNotice(null);
     setOutput(null);
+    setGeneratedTasks([]);
     setEditing(false);
     try {
       const res = await fetch("/api/ai", {
@@ -125,6 +135,9 @@ function AiAssistantContent() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
       setOutput(data.text);
+      setGeneratedTasks(
+        Array.isArray(data.tasks) ? (data.tasks as GeneratedTask[]) : []
+      );
       setMockMode(Boolean(data.mock));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
@@ -214,9 +227,27 @@ function AiAssistantContent() {
           throw new Error(data.error || "Feedback could not be saved");
         }
       }
+      if (action === "notes_to_tasks") {
+        if (generatedTasks.length === 0) {
+          throw new Error("No validated tasks are ready to create");
+        }
+        const response = await fetch("/api/ai/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tasks: generatedTasks }),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(data.error || "Tasks could not be created");
+        }
+        setNotice(
+          `${data.count} ${data.count === 1 ? "task" : "tasks"} created. They are now available on the Tasks page.`
+        );
+      }
 
       pushToHistory(output, true, false);
       setOutput(null);
+      setGeneratedTasks([]);
       setPrompt("");
       setNotesTruncated(false);
     } catch (approveError) {
@@ -461,6 +492,20 @@ function AiAssistantContent() {
             </div>
           )}
 
+          {notice && (
+            <div
+              className="rounded-lg border px-4 py-3 text-sm"
+              style={{
+                background: "var(--color-success-bg)",
+                borderColor: "var(--color-success)",
+                color: "var(--color-success)",
+              }}
+              role="status"
+            >
+              {notice}
+            </div>
+          )}
+
           {/* Output */}
           {output && (
             <div className="card animate-fade-in">
@@ -508,14 +553,20 @@ function AiAssistantContent() {
                       ) : (
                         <CheckCircle2 className="h-4 w-4" aria-hidden />
                       )}
-                      {approving ? "Saving…" : "Approve"}
+                      {approving
+                        ? "Saving…"
+                        : action === "notes_to_tasks" && generatedTasks.length > 0
+                          ? `Create ${generatedTasks.length} ${generatedTasks.length === 1 ? "task" : "tasks"}`
+                          : "Approve"}
                     </button>
-                    <button
-                      className="btn btn-secondary btn-sm"
-                      onClick={() => { setEditText(output); setEditing(true); }}
-                    >
-                      <PenLine className="h-4 w-4" aria-hidden /> Edit
-                    </button>
+                    {action !== "notes_to_tasks" && (
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        onClick={() => { setEditText(output); setEditing(true); }}
+                      >
+                        <PenLine className="h-4 w-4" aria-hidden /> Edit
+                      </button>
+                    )}
                     <button className="btn btn-ghost btn-sm" onClick={handleDiscard}>
                       <Trash2 className="h-4 w-4" aria-hidden /> Discard
                     </button>
