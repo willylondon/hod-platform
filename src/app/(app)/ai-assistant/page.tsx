@@ -38,15 +38,13 @@ const ACTIONS = [
   { id: "notes_to_tasks", label: "Convert Notes Into Tasks", icon: ListTodo },
 ];
 
-const CONTEXT_OPTIONS = [
-  { id: "", label: "No context selected — general assistant mode" },
-  { id: "obs-1", label: "Observation — Jane Smith, Year 10 Maths (feedback pending)" },
-  { id: "goal-1", label: "Goal — Raise GCSE attainment in English by 8%" },
-  { id: "meeting-1", label: "Meeting — Department Meeting, Wednesday 3:30pm" },
-  { id: "task-1", label: "Task — Compile Year 11 intervention list" },
-  { id: "staff-1", label: "Staff Member — David Okafor (appraisal due)" },
-  { id: "workflow-1", label: "Workflow — End of Term Reporting Process" },
-];
+type ContextType = "observation" | "meeting" | "task" | "goal" | "staff";
+
+interface ContextOption {
+  type: ContextType;
+  id: string;
+  label: string;
+}
 
 const ACTION_QUERY_PARAM_MAP: Record<string, string> = {
   feedback: "observation_feedback",
@@ -55,9 +53,13 @@ const ACTION_QUERY_PARAM_MAP: Record<string, string> = {
 function AiAssistantContent() {
   const searchParams = useSearchParams();
   const requestedAction = ACTION_QUERY_PARAM_MAP[searchParams.get("action") ?? ""];
+  const requestedContextType = searchParams.get("context");
+  const requestedContextId = searchParams.get("id");
   const [mockMode, setMockMode] = useState<boolean | null>(null);
   const [selectedActionId, setSelectedActionId] = useState<string | null>(null);
-  const [contextId, setContextId] = useState("");
+  const [contextKey, setContextKey] = useState("");
+  const [contextOptions, setContextOptions] = useState<ContextOption[]>([]);
+  const [contextsLoading, setContextsLoading] = useState(true);
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -77,13 +79,28 @@ function AiAssistantContent() {
   useEffect(() => {
     fetch("/api/ai")
       .then((r) => r.json())
-      .then((d) => setMockMode(Boolean(d.mock)))
-      .catch(() => setMockMode(true));
-  }, []);
+      .then((d) => {
+        const contexts = Array.isArray(d.contexts) ? (d.contexts as ContextOption[]) : [];
+        setMockMode(Boolean(d.mock));
+        setContextOptions(contexts);
+        const requestedContext = contexts.find(
+          (option) =>
+            option.type === requestedContextType && option.id === requestedContextId
+        );
+        if (requestedContext) {
+          setContextKey(`${requestedContext.type}:${requestedContext.id}`);
+        }
+      })
+      .catch(() => setMockMode(true))
+      .finally(() => setContextsLoading(false));
+  }, [requestedContextId, requestedContextType]);
 
   const action = selectedActionId ?? requestedAction ?? ACTIONS[0].id;
   const selectedAction = ACTIONS.find((a) => a.id === action)!;
-  const contextLabel = CONTEXT_OPTIONS.find((c) => c.id === contextId)?.label ?? "";
+  const selectedContext = contextOptions.find(
+    (option) => `${option.type}:${option.id}` === contextKey
+  );
+  const contextLabel = selectedContext?.label ?? "";
 
   async function generate() {
     setLoading(true);
@@ -94,7 +111,15 @@ function AiAssistantContent() {
       const res = await fetch("/api/ai", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, context: contextId ? contextLabel : "", prompt, styleReference: styleReference || undefined }),
+        body: JSON.stringify({
+          action,
+          context: selectedContext ? contextLabel : "",
+          contextRef: selectedContext
+            ? { type: selectedContext.type, id: selectedContext.id }
+            : undefined,
+          prompt,
+          styleReference: styleReference || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Generation failed");
@@ -158,8 +183,8 @@ function AiAssistantContent() {
       id: crypto.randomUUID(),
       user_id: "local",
       action: selectedAction.label,
-      context_type: contextId ? contextLabel.split(" — ")[0] : undefined,
-      context_id: contextId || undefined,
+      context_type: selectedContext?.type,
+      context_id: selectedContext?.id,
       input_prompt: prompt || undefined,
       output_text: text,
       is_approved: approved,
@@ -261,11 +286,22 @@ function AiAssistantContent() {
             <select
               id="ai-context"
               className="form-select mb-4"
-              value={contextId}
-              onChange={(e) => setContextId(e.target.value)}
+              value={contextKey}
+              onChange={(e) => setContextKey(e.target.value)}
+              disabled={contextsLoading}
             >
-              {CONTEXT_OPTIONS.map((c) => (
-                <option key={c.id} value={c.id}>{c.label}</option>
+              <option value="">
+                {contextsLoading
+                  ? "Loading workspace context…"
+                  : "No context selected — general assistant mode"}
+              </option>
+              {contextOptions.map((contextOption) => (
+                <option
+                  key={`${contextOption.type}:${contextOption.id}`}
+                  value={`${contextOption.type}:${contextOption.id}`}
+                >
+                  {contextOption.label}
+                </option>
               ))}
             </select>
 
@@ -361,7 +397,7 @@ function AiAssistantContent() {
 
             <div className="flex-between">
               <span className="text-muted text-xs">
-                {contextId ? contextLabel : "No context selected — general assistant mode"}
+                {selectedContext ? contextLabel : "No context selected — general assistant mode"}
               </span>
               <button
                 className="btn btn-primary"
