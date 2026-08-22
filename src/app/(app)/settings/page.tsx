@@ -474,12 +474,12 @@ export default function SettingsPage() {
           {[
             { name: "Google Calendar", desc: "Connect once and sync events automatically", icon: Calendar, available: true },
             { name: "Microsoft Outlook", desc: "Automatic calendar sync", icon: Calendar, available: false },
-            { name: "Timetable Upload", desc: "CSV / XLSX import", icon: Upload, available: false },
+            { name: "Timetable Upload", desc: "CSV / XLSX / image import", icon: Upload, available: true },
           ].map((int, i) => (
             <div key={i} className="flex items-center gap-3 p-3 rounded-md border border-border bg-surface-alt">
               <int.icon className="w-5 h-5 text-muted shrink-0" />
               <div className="flex-1"><p className="text-sm font-medium">{int.name}</p><p className="text-xs text-muted">{int.desc}</p></div>
-              {int.available ? <Link href="/calendar" className="btn btn-secondary btn-sm">Open</Link> : <><span className="badge badge-low text-xs shrink-0">Coming soon</span><button className="btn btn-secondary btn-sm" disabled>Connect</button></>}
+              {int.available ? <Link href={int.name === "Timetable Upload" ? "/timetable" : "/calendar"} className="btn btn-secondary btn-sm">Open</Link> : <><span className="badge badge-low text-xs shrink-0">Coming soon</span><button className="btn btn-secondary btn-sm" disabled>Connect</button></>}
             </div>
           ))}
         </div>

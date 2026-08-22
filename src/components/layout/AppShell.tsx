@@ -13,6 +13,7 @@ import {
   Sparkles,
   Target,
   GraduationCap,
+  CalendarClock,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -37,6 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/assistant", label: "AI Assistant", icon: Sparkles },
   { href: "/goals", label: "Goals", icon: Target },
   { href: "/staff", label: "Staff", icon: GraduationCap },
+  { href: "/timetable", label: "Timetable", icon: CalendarClock },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

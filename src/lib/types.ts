@@ -283,3 +283,36 @@ export interface Notification {
   delivery_key?: string;
   created_at: string;
 }
+
+export interface TimetableImport {
+  id: string;
+  school_id: string;
+  file_name: string | null;
+  uploaded_at: string;
+  status: "pending" | "processing" | "completed" | "failed";
+  uploaded_by: string | null;
+  storage_path: string | null;
+  file_type: "csv" | "xlsx" | "image" | null;
+  raw_text: string | null;
+  error_message: string | null;
+}
+
+export interface TimetableSlot {
+  id: string;
+  import_id: string;
+  day_of_week: number; // 1 = Monday … 7
+  period_label: string;
+  start_time: string | null; // HH:MM:SS
+  end_time: string | null;
+  content: string;
+  kind:
+    | "class"
+    | "registration"
+    | "break"
+    | "lunch"
+    | "assembly"
+    | "meeting"
+    | "clubs"
+    | "free";
+  sort_order: number;
+}
